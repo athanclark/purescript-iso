@@ -24,6 +24,8 @@ dependencies:
 - aeson
 - attoparsec-uri
 - containers
+- mtl
+- stm
 - strict
 - text
 - QuickCheck

@@ -1,6 +1,11 @@
 {-# LANGUAGE
     DeriveGeneric
   , OverloadedStrings
+  , GADTs
+  , RankNTypes
+  , ScopedTypeVariables
+  , NamedFieldPuns
+  , ExistentialQuantification
   #-}
 
 module Test.Serialization.Types where
@@ -8,10 +13,18 @@ module Test.Serialization.Types where
 import Data.Text (Text)
 import Data.Set (Set)
 import qualified Data.Set as Set
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
 import Data.UUID (UUID)
 import Data.Aeson (FromJSON (..), ToJSON (..), object, (.:), (.=), Value (Object, String))
 import Data.Aeson.Types (typeMismatch)
+import Data.Proxy (Proxy (..))
 import Control.Applicative ((<|>))
+import Control.Monad.Reader (ReaderT, ask)
+import Control.Monad.IO.Class (liftIO)
+import Control.Concurrent.STM
+  (TVar, TMVar, newTVar, newEmptyTMVar, atomically, modifyTVar)
+import Test.QuickCheck (Arbitrary)
 import GHC.Generics (Generic)
 
 
@@ -38,27 +51,6 @@ instance FromJSON ServerToClientControl where
     where
       fail' = typeMismatch "ServerToClientControl" x
 
-data ServerToClientChannel a
-  = GeneratedInputByServer a
-  | SerializedByServer Value
-  | DeSerializedByServer a
-  deriving (Eq, Show, Generic)
-
-instance (ToJSON a) => ToJSON (ServerToClientChannel a) where
-  toJSON x = case x of
-    GeneratedInputByServer y -> object ["generated" .= y]
-    SerializedByServer y -> object ["serialized" .= y]
-    DeSerializedByServer y -> object ["deserialized" .= y]
-
-instance (FromJSON a) => FromJSON (ServerToClientChannel a) where
-  parseJSON x = case x of
-    Object o -> do
-      let gen = GeneratedInputByServer <$> o .: "generated"
-          ser = SerializedByServer <$> o .: "serialized"
-          des = DeSerializedByServer <$> o .: "deserialized"
-      gen <|> ser <|> des
-    _ -> typeMismatch "ServerToClientChannel" x
-
 
 data ClientToServerControl
   = ClientRegister UUID
@@ -81,23 +73,70 @@ instance FromJSON ClientToServerControl where
       fail' = typeMismatch "ClientToServerControl" x
 
 
-data ClientToServerChannel a
-  = GeneratedInputByClient a
-  | SerializedByClient Value
-  | DeSerializedByClient a
+data ChannelMsg
+  = GeneratedInputBy TestTopic Value
+  | SerializedBy TestTopic Value
+  | DeSerializedBy TestTopic Value
+  | FailureBy TestTopic Value
   deriving (Eq, Show, Generic)
 
-instance (ToJSON a) => ToJSON (ClientToServerChannel a) where
+instance ToJSON ChannelMsg where
   toJSON x = case x of
-    GeneratedInputByClient y -> object ["generated" .= y]
-    SerializedByClient y -> object ["serialized" .= y]
-    DeSerializedByClient y -> object ["deserialized" .= y]
+    GeneratedInputBy t y -> object ["topic" .= t, "generated" .= y]
+    SerializedBy t y -> object ["topic" .= t, "serialized" .= y]
+    DeSerializedBy t y -> object ["topic" .= t, "deserialized" .= y]
+    FailureBy t y -> object ["topic" .= t, "failure" .= y]
 
-instance (FromJSON a) => FromJSON (ClientToServerChannel a) where
+instance FromJSON ChannelMsg where
   parseJSON x = case x of
     Object o -> do
-      let gen = GeneratedInputByClient <$> o .: "generated"
-          ser = SerializedByClient <$> o .: "serialized"
-          des = DeSerializedByClient <$> o .: "deserialized"
-      gen <|> ser <|> des
-    _ -> typeMismatch "ClientToServerChannel" x
+      let gen = GeneratedInputBy <$> o .: "topic" <*> o .: "generated"
+          ser = SerializedBy <$> o .: "topic" <*> o .: "serialized"
+          des = DeSerializedBy <$> o .: "topic" <*> o .: "deserialized"
+          fai = FailureBy <$> o .: "topic" <*> o .: "failure"
+      gen <|> ser <|> des <|> fai
+    _ -> typeMismatch "ChannelMsg" x
+
+
+
+data TestTopicState =
+  forall a
+  . ( Arbitrary a
+    , ToJSON a
+    , FromJSON a
+    ) => TestTopicState
+  { size    :: TVar Int
+  , serverG :: TMVar a
+  , clientS :: TMVar Value
+  , serverD :: TMVar a
+  , clientG :: TMVar a
+  , serverS :: TMVar Value
+  , clientD :: TMVar a
+  }
+
+type TestSuiteState = TVar (Map TestTopic TestTopicState)
+
+type TestSuiteM a = ReaderT TestSuiteState IO a
+
+registerTopic :: forall a
+               . ( Arbitrary a
+                 , ToJSON a
+                 , FromJSON a
+                 ) => TestTopic
+                   -> Proxy a
+                   -> TestSuiteM ()
+registerTopic topic Proxy = do
+  xsRef <- ask
+  liftIO $ atomically $ do
+    size <- newTVar 1
+    (serverG :: TMVar a) <- newEmptyTMVar
+    clientS <- newEmptyTMVar
+    (serverD :: TMVar a) <- newEmptyTMVar
+    (clientG :: TMVar a) <- newEmptyTMVar
+    serverS <- newEmptyTMVar
+    (clientD :: TMVar a) <- newEmptyTMVar
+    modifyTVar xsRef $ Map.insert topic TestTopicState
+      {size,serverG,clientS,serverD,clientG,serverS,clientD}
+
+
+-- type SerializeTestsM 
