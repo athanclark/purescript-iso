@@ -24,7 +24,7 @@ import Control.Applicative ((<|>))
 import Control.Monad.Reader (ReaderT, ask)
 import Control.Monad.IO.Class (liftIO)
 import Control.Concurrent.STM
-  ( TVar, TMVar, newTVar, newEmptyTMVar, atomically, modifyTVar, readTVar
+  ( STM, TVar, TMVar, newTVar, newEmptyTMVar, atomically, modifyTVar, readTVar
   , putTMVar, tryReadTMVar, tryTakeTMVar)
 import Test.QuickCheck (Arbitrary (..))
 import Test.QuickCheck.Gen (Gen, unGen)
@@ -127,6 +127,34 @@ data TestTopicState =
   , clientD :: TMVar a
   }
 
+emptyTestTopicState :: forall a
+                     . ( Arbitrary a
+                       , ToJSON a
+                       , FromJSON a
+                       , Eq a
+                       ) => Proxy a -> STM TestTopicState
+emptyTestTopicState Proxy = do
+  size <- newTVar 1
+  (serverG :: TMVar a) <- newEmptyTMVar
+  clientS <- newEmptyTMVar
+  (serverD :: TMVar a) <- newEmptyTMVar
+  (clientG :: TMVar a) <- newEmptyTMVar
+  serverS <- newEmptyTMVar
+  (clientD :: TMVar a) <- newEmptyTMVar
+  pure TestTopicState
+    { size
+    , serverG
+    , clientS
+    , serverD
+    , clientG
+    , serverS
+    , clientD
+    , generate = arbitrary
+    , serialize = toJSON
+    , deserialize = parseJSON
+    }
+
+
 type TestSuiteState = TVar (Map TestTopic TestTopicState)
 
 type TestSuiteM a = ReaderT TestSuiteState IO a
@@ -139,28 +167,11 @@ registerTopic :: forall a
                  ) => TestTopic
                    -> Proxy a
                    -> TestSuiteM ()
-registerTopic topic Proxy = do
+registerTopic topic p = do
   xsRef <- ask
   liftIO $ atomically $ do
-    size <- newTVar 1
-    (serverG :: TMVar a) <- newEmptyTMVar
-    clientS <- newEmptyTMVar
-    (serverD :: TMVar a) <- newEmptyTMVar
-    (clientG :: TMVar a) <- newEmptyTMVar
-    serverS <- newEmptyTMVar
-    (clientD :: TMVar a) <- newEmptyTMVar
-    modifyTVar xsRef $ Map.insert topic TestTopicState
-      { size
-      , serverG
-      , clientS
-      , serverD
-      , clientG
-      , serverS
-      , clientD
-      , generate = arbitrary
-      , serialize = toJSON
-      , deserialize = parseJSON
-      }
+    state <- emptyTestTopicState p
+    modifyTVar xsRef (Map.insert topic state)
 
 
 data HasTopic a
