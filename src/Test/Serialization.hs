@@ -8,7 +8,7 @@ module Test.Serialization where
 
 import Test.Serialization.Types
   ( TestSuiteM, ChannelMsg (..), ServerToClientControl (..)
-  , ClientToServerControl (..), TestSuiteState)
+  , ClientToServerControl (..), TestSuiteState, emptyTestSuiteState)
 
 import Data.URI (URI (..), printURI)
 import Data.URI.Auth (URIAuth)
@@ -25,7 +25,8 @@ import Control.Monad.Reader (runReaderT)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Control (liftBaseWith)
 import Control.Concurrent.Async (async, link, cancel)
-import Control.Concurrent.STM (newTVarIO)
+import Control.Concurrent.STM
+  (STM, TVar, newTVar, atomically, modifyTVar, readTVar)
 import System.ZMQ4.Monadic
   (runZMQ, socket, bind, Rep (..), Push (..), Pull (..), receive, send')
 
@@ -38,7 +39,10 @@ data ServerParams = ServerParams
   }
 
 
-type ServerState = Map UUID TestSuiteState
+type ServerState = TVar (Map UUID TestSuiteState)
+
+emptyServerState :: STM ServerState
+emptyServerState = newTVar Map.empty
 
 
 
@@ -57,10 +61,7 @@ startServer ServerParams{..} = do
     bind channelServiceOut $ T.unpack $ printURI $
       URI (Strict.Just "tcp") True serverParamsChannelOutHost [] [] Strict.Nothing
 
-    serverState <- liftIO $ do
-      r <- newTVarIO Map.empty
-      runReaderT serverParamsTestSuite r
-      pure r
+    serverStateRef <- liftIO $ atomically emptyServerState
 
     firstCtlMsgBS <- receive controlService
 
@@ -70,7 +71,8 @@ startServer ServerParams{..} = do
         send' controlService [] (encode err)
         error $ show err
       Just x -> case x of
-        ClientRegister clientKey -> undefined -- continue
+        ClientRegister clientKey ->
+          liftIO $ registerClient serverParamsTestSuite serverStateRef clientKey
         ClientDeRegister -> error "client DeRegistered without registering..."
 
     deregisterThread <- liftBaseWith $ \runInBase ->
@@ -105,3 +107,19 @@ startServer ServerParams{..} = do
 -- processChannelMsg :: TestSuiteState
 --                   -> ChannelMsg
 --                   -> 
+
+
+registerClient :: TestSuiteM ()
+               -> ServerState
+               -> UUID
+               -> IO ()
+registerClient tests serverState clientKey = do
+  ss <- atomically $ readTVar serverState
+  case Map.lookup clientKey ss of
+    Just _ -> error "Client key already taken"
+    Nothing -> do
+      suiteState <- atomically $ do
+        x <- emptyTestSuiteState
+        modifyTVar serverState $ Map.insert clientKey x
+        pure x
+      runReaderT tests suiteState

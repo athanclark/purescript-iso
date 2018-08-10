@@ -157,7 +157,12 @@ emptyTestTopicState Proxy = do
 
 type TestSuiteState = TVar (Map TestTopic TestTopicState)
 
+emptyTestSuiteState :: STM TestSuiteState
+emptyTestSuiteState = newTVar Map.empty
+
+
 type TestSuiteM a = ReaderT TestSuiteState IO a
+
 
 registerTopic :: forall a
                . ( Arbitrary a
