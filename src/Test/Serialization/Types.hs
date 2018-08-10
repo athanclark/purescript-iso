@@ -38,16 +38,21 @@ type TestTopic = Text
 data ServerToClientControl
   = TopicsAvailable (Set TestTopic)
   | Ready
+  | BadParse Text
   deriving (Eq, Show, Generic)
 
 instance ToJSON ServerToClientControl where
   toJSON x = case x of
     TopicsAvailable xs -> object ["topics" .= Set.toList xs]
     Ready -> String "ready"
+    BadParse x -> object ["badParse" .= x]
 
 instance FromJSON ServerToClientControl where
   parseJSON x = case x of
-    Object o -> TopicsAvailable . Set.fromList <$> o .: "topics"
+    Object o -> do
+      let available = TopicsAvailable . Set.fromList <$> o .: "topics"
+          badParse = BadParse <$> o .: "badParse"
+      available <|> badParse
     String s
       | s == "ready" -> pure Ready
       | otherwise -> fail'
@@ -78,26 +83,26 @@ instance FromJSON ClientToServerControl where
 
 
 data ChannelMsg
-  = GeneratedInputBy TestTopic Value
-  | SerializedBy TestTopic Value
-  | DeSerializedBy TestTopic Value
-  | FailureBy TestTopic Value
+  = GeneratedInput TestTopic Value
+  | Serialized TestTopic Value
+  | DeSerialized TestTopic Value
+  | Failure TestTopic Value
   deriving (Eq, Show, Generic)
 
 instance ToJSON ChannelMsg where
   toJSON x = case x of
-    GeneratedInputBy t y -> object ["topic" .= t, "generated" .= y]
-    SerializedBy t y -> object ["topic" .= t, "serialized" .= y]
-    DeSerializedBy t y -> object ["topic" .= t, "deserialized" .= y]
-    FailureBy t y -> object ["topic" .= t, "failure" .= y]
+    GeneratedInput t y -> object ["topic" .= t, "generated" .= y]
+    Serialized t y -> object ["topic" .= t, "serialized" .= y]
+    DeSerialized t y -> object ["topic" .= t, "deserialized" .= y]
+    Failure t y -> object ["topic" .= t, "failure" .= y]
 
 instance FromJSON ChannelMsg where
   parseJSON x = case x of
     Object o -> do
-      let gen = GeneratedInputBy <$> o .: "topic" <*> o .: "generated"
-          ser = SerializedBy <$> o .: "topic" <*> o .: "serialized"
-          des = DeSerializedBy <$> o .: "topic" <*> o .: "deserialized"
-          fai = FailureBy <$> o .: "topic" <*> o .: "failure"
+      let gen = GeneratedInput <$> o .: "topic" <*> o .: "generated"
+          ser = Serialized <$> o .: "topic" <*> o .: "serialized"
+          des = DeSerialized <$> o .: "topic" <*> o .: "deserialized"
+          fai = Failure <$> o .: "topic" <*> o .: "failure"
       gen <|> ser <|> des <|> fai
     _ -> typeMismatch "ChannelMsg" x
 
@@ -208,6 +213,26 @@ data HasClientS a
   | HasClientS a
 
 
+data ServerSerializedMatch a
+  = ServerSerializedMatch a
+  | ServerSerializedMismatch
+
+
+data ServerDeSerializedMatch a
+  = ServerDeSerializedMatch a
+  | ServerDeSerializedMismatch
+
+
+data ClientSerializedMatch a
+  = ClientSerializedMatch a
+  | ClientSerializedMismatch
+
+
+data ClientDeSerializedMatch a
+  = ClientDeSerializedMatch a
+  | ClientDeSerializedMismatch
+
+
 getTopicState :: TestSuiteState
               -> TestTopic
               -> IO (HasTopic TestTopicState)
@@ -220,7 +245,7 @@ getTopicState xsRef topic = do
 
 generateValue :: TestSuiteState
               -> TestTopic
-              -> IO (HasTopic (GenValue ()))
+              -> IO (HasTopic (GenValue ChannelMsg))
 generateValue xsRef topic = do
   mState <- getTopicState xsRef topic
   case mState of
@@ -235,7 +260,7 @@ generateValue xsRef topic = do
           atomically $ do
             modifyTVar size (+ 1)
             putTMVar serverG val
-          pure (GenValue ())
+          pure $ GenValue $ GeneratedInput topic $ serialize val
 
 
 gotClientGenValue :: TestSuiteState
@@ -256,7 +281,7 @@ gotClientGenValue xsRef topic value = do
 
 serializeValueClientOrigin :: TestSuiteState
                            -> TestTopic
-                           -> IO (HasTopic (HasClientG ()))
+                           -> IO (HasTopic (HasClientG ChannelMsg))
 serializeValueClientOrigin xsRef topic = do
   mState <- getTopicState xsRef topic
   case mState of
@@ -266,8 +291,9 @@ serializeValueClientOrigin xsRef topic = do
       case mX of
         Nothing -> pure NoClientG
         Just x -> fmap HasClientG $ do
-          atomically $ putTMVar serverS $ serialize x
-          pure ()
+          let val = serialize x
+          atomically $ putTMVar serverS val
+          pure $ Serialized topic val
 
 
 gotClientSerialize :: TestSuiteState
@@ -285,12 +311,12 @@ gotClientSerialize xsRef topic value = do
 
 deserializeValueClientOrigin :: TestSuiteState
                              -> TestTopic
-                             -> IO (HasTopic (HasClientS (DesValue ())))
+                             -> IO (HasTopic (HasClientS (DesValue ChannelMsg)))
 deserializeValueClientOrigin xsRef topic = do
   mState <- getTopicState xsRef topic
   case mState of
     NoTopic -> pure NoTopic
-    HasTopic (TestTopicState{deserialize,clientS,serverD}) -> fmap HasTopic $ do
+    HasTopic (TestTopicState{deserialize,clientS,serverD,serialize}) -> fmap HasTopic $ do
       mX <- atomically (tryReadTMVar clientS)
       case mX of
         Nothing -> pure NoClientS
@@ -298,7 +324,7 @@ deserializeValueClientOrigin xsRef topic = do
           Left e -> pure (CantDes e)
           Right y -> do
             atomically (putTMVar serverD y)
-            pure (DesValue ())
+            pure $ DesValue $ DeSerialized topic $ serialize y
 
 
 gotClientDeSerialize :: TestSuiteState
@@ -315,26 +341,6 @@ gotClientDeSerialize xsRef topic value = do
         Right y -> do
           atomically (putTMVar clientD y)
           pure (DesValue ())
-
-
-data ServerSerializedMatch a
-  = ServerSerializedMatch a
-  | ServerSerializedMismatch
-
-
-data ServerDeSerializedMatch a
-  = ServerDeSerializedMatch a
-  | ServerDeSerializedMismatch
-
-
-data ClientSerializedMatch a
-  = ClientSerializedMatch a
-  | ClientSerializedMismatch
-
-
-data ClientDeSerializedMatch a
-  = ClientDeSerializedMatch a
-  | ClientDeSerializedMismatch
 
 
 verify :: TestSuiteState
