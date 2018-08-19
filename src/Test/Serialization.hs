@@ -2,13 +2,19 @@
     OverloadedStrings
   , OverloadedLists
   , RecordWildCards
+  , ScopedTypeVariables
   #-}
 
 module Test.Serialization where
 
 import Test.Serialization.Types
-  ( TestSuiteM, ChannelMsg (..), ServerToClientControl (..)
-  , ClientToServerControl (..), TestSuiteState, emptyTestSuiteState)
+  ( TestSuiteM, ChannelMsg (..), ServerToClient (..), TestTopic
+  , ClientToServer (..), TestSuiteState, emptyTestSuiteState
+  , gotClientGenValue, serializeValueClientOrigin
+  , gotClientSerialize, gotClientDeSerialize
+  , deserializeValueClientOrigin, verify, generateValue
+  , HasTopic (..), DesValue (..), HasClientG (..), GenValue (..)
+  , HasClientS (..), isOkay)
 
 import Data.URI (URI (..), printURI)
 import Data.URI.Auth (URIAuth)
@@ -17,6 +23,8 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Strict.Maybe as Strict
+import Data.List.NonEmpty (NonEmpty (..))
+import Data.Set (Set)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Aeson (decode, encode)
@@ -28,18 +36,18 @@ import Control.Concurrent.Async (async, link, cancel)
 import Control.Concurrent.STM
   (STM, TVar, newTVar, atomically, modifyTVar, readTVar)
 import System.ZMQ4.Monadic
-  (runZMQ, socket, bind, Rep (..), Push (..), Pull (..), receive, send')
+  (runZMQ, Router (..), Dealer (..))
+import qualified System.ZMQ4.Simple as Z
 
 
 data ServerParams = ServerParams
   { serverParamsControlHost :: URIAuth
-  , serverParamsChannelOutHost :: URIAuth
-  , serverParamsChannelInHost :: URIAuth
   , serverParamsTestSuite :: TestSuiteM ()
   }
 
 
-type ServerState = TVar (Map UUID TestSuiteState)
+-- TODO client threads?
+type ServerState = TVar (Map Z.ZMQIdent TestSuiteState)
 
 emptyServerState :: STM ServerState
 emptyServerState = newTVar Map.empty
@@ -49,70 +57,88 @@ emptyServerState = newTVar Map.empty
 startServer :: ServerParams -> IO ()
 startServer ServerParams{..} = do
   runZMQ $ do
-    controlService <- socket Rep
-    bind controlService $ T.unpack $ printURI $
-      URI (Strict.Just "tcp") True serverParamsControlHost [] [] Strict.Nothing
+    server <- Z.socket Router Dealer
+    Z.bind server $ T.unpack $ printURI $
+      URI (Strict.Just "tcp") True serverParamsControlHost Strict.Nothing [] Strict.Nothing
 
-    channelServiceIn <- socket Pull
-    bind channelServiceIn $ T.unpack $ printURI $
-      URI (Strict.Just "tcp") True serverParamsChannelInHost [] [] Strict.Nothing
-
-    channelServiceOut <- socket Push
-    bind channelServiceOut $ T.unpack $ printURI $
-      URI (Strict.Just "tcp") True serverParamsChannelOutHost [] [] Strict.Nothing
-
-    serverStateRef <- liftIO $ atomically emptyServerState
-
-    firstCtlMsgBS <- receive controlService
-
-    case decode (LBS.fromStrict firstCtlMsgBS) of
-      Nothing -> do
-        let err = BadParse (T.decodeUtf8 firstCtlMsgBS)
-        send' controlService [] (encode err)
-        error $ show err
-      Just x -> case x of
-        ClientRegister clientKey ->
-          liftIO $ registerClient serverParamsTestSuite serverStateRef clientKey
-        ClientDeRegister -> error "client DeRegistered without registering..."
-
-    deregisterThread <- liftBaseWith $ \runInBase ->
-      async $ forever $ void $ runInBase $ do
-        asyncCtlMsgBS <- receive controlService
-        case decode (LBS.fromStrict asyncCtlMsgBS) of
-          Nothing -> do
-            let err = BadParse (T.decodeUtf8 asyncCtlMsgBS)
-            send' controlService [] (encode err)
-            error $ show err
-          Just x -> case x of
-            ClientDeRegister -> undefined -- unregister
-            ClientRegister k -> error $ "client Registered out of nowhere: " ++ show k
-
-    liftIO (link deregisterThread)
+    serverStateRef <- liftIO (atomically emptyServerState)
 
     forever $ do
-      asyncChnMsgBS <- receive channelServiceIn
-      case decode (LBS.fromStrict asyncChnMsgBS) of
-        Nothing -> do
-          let err = BadParse (T.decodeUtf8 asyncChnMsgBS)
-          send' controlService [] (encode err)
-          liftIO (cancel deregisterThread)
-          error $ show err
-        Just x -> case x of
-          GeneratedInput _ _ -> undefined -- verify state & continue
-          Serialized _ _ -> undefined -- verify state & continue
-          DeSerialized _ _ -> undefined -- verify state & continue or halt
-          Failure _ _ -> undefined -- halt and report
+      mIncoming <- Z.receive server
+      case mIncoming of
+        Nothing -> liftIO $ putStrLn $ "No incoming message?"
+        Just (addr :: Z.ZMQIdent, incoming :| _) -> case decode (LBS.fromStrict incoming) of
+          Nothing -> do
+            let err = LBS.toStrict $ encode $ ServerToClientBadParse $ T.decodeUtf8 incoming
+            Z.send addr server (err :| [])
+            error $ show err
+          Just (x :: ClientToServer) -> case x of
+            Finished -> liftIO $ putStrLn "success"
+            GetTopics -> do
+              ts <- liftIO $ registerClient serverParamsTestSuite serverStateRef addr
+              let outgoing = LBS.toStrict $ encode $ TopicsAvailable ts
+              Z.send addr server (outgoing :| [])
+            ClientToServerBadParse e -> error $ T.unpack e
+            ClientToServer msg -> case msg of
+              GeneratedInput t y -> do
+                mSuiteState <- liftIO $ atomically $ getTestSuiteState serverStateRef addr
+                case mSuiteState of
+                  Nothing -> error "No test suite state!"
+                  Just suiteState -> do
+                    mOk <- liftIO $ gotClientGenValue suiteState t y
+                    if isOkay mOk
+                      then do
+                        mOutgoing <- liftIO $ serializeValueClientOrigin suiteState t
+                        case mOutgoing of
+                          HasTopic (HasClientG outgoing) ->
+                            Z.send addr server (LBS.toStrict (encode outgoing) :| [])
+                          _ -> error $ show mOutgoing
+                      else error $ show mOk
+              DeSerialized t y -> do
+                mSuiteState <- liftIO $ atomically $ getTestSuiteState serverStateRef addr
+                case mSuiteState of
+                  Nothing -> error "No test suite state!"
+                  Just suiteState -> do
+                    mOk <- liftIO $ gotClientDeSerialize suiteState t y
+                    if isOkay mOk
+                      then do
+                        mOutgoing <- liftIO $ generateValue suiteState t
+                        case mOutgoing of
+                          HasTopic (GenValue outgoing) ->
+                            Z.send addr server (LBS.toStrict (encode outgoing) :| [])
+                          _ -> error $ show mOutgoing
+                      else error $ show mOk
+              Serialized t y -> do
+                mSuiteState <- liftIO $ atomically $ getTestSuiteState serverStateRef addr
+                case mSuiteState of
+                  Nothing -> error "No test suite state!"
+                  Just suiteState -> do
+                    mOk <- liftIO $ gotClientSerialize suiteState t y
+                    if isOkay mOk
+                      then do
+                        mOutgoing <- liftIO $ deserializeValueClientOrigin suiteState t
+                        case mOutgoing of
+                          HasTopic (HasClientS (DesValue outgoing)) -> do
+                            Z.send addr server (LBS.toStrict (encode outgoing) :| [])
+                            mOk' <- liftIO $ verify suiteState t
+                            if isOkay mOk'
+                              then Z.send addr server (LBS.toStrict (encode Continue) :| [])
+                              else error $ show mOk'
+                          _ -> error $ show mOutgoing
+                      else error $ show mOk
+              Failure t y -> error $ "Failure: " ++ show t ++ ", " ++ show y
 
 
--- processChannelMsg :: TestSuiteState
---                   -> ChannelMsg
---                   -> 
+
+
+getTestSuiteState :: ServerState -> Z.ZMQIdent -> STM (Maybe TestSuiteState)
+getTestSuiteState serverState clientKey = Map.lookup clientKey <$> readTVar serverState
 
 
 registerClient :: TestSuiteM ()
                -> ServerState
-               -> UUID
-               -> IO ()
+               -> Z.ZMQIdent
+               -> IO (Set TestTopic)
 registerClient tests serverState clientKey = do
   ss <- atomically $ readTVar serverState
   case Map.lookup clientKey ss of
@@ -120,6 +146,7 @@ registerClient tests serverState clientKey = do
     Nothing -> do
       suiteState <- atomically $ do
         x <- emptyTestSuiteState
-        modifyTVar serverState $ Map.insert clientKey x
+        modifyTVar serverState (Map.insert clientKey x)
         pure x
       runReaderT tests suiteState
+      Map.keysSet <$> atomically (readTVar suiteState)

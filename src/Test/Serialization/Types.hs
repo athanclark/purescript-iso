@@ -35,53 +35,6 @@ import GHC.Generics (Generic)
 type TestTopic = Text
 
 
-data ServerToClientControl
-  = TopicsAvailable (Set TestTopic)
-  | Ready
-  | BadParse Text
-  deriving (Eq, Show, Generic)
-
-instance ToJSON ServerToClientControl where
-  toJSON x = case x of
-    TopicsAvailable xs -> object ["topics" .= Set.toList xs]
-    Ready -> String "ready"
-    BadParse x -> object ["badParse" .= x]
-
-instance FromJSON ServerToClientControl where
-  parseJSON x = case x of
-    Object o -> do
-      let available = TopicsAvailable . Set.fromList <$> o .: "topics"
-          badParse = BadParse <$> o .: "badParse"
-      available <|> badParse
-    String s
-      | s == "ready" -> pure Ready
-      | otherwise -> fail'
-    _ -> fail'
-    where
-      fail' = typeMismatch "ServerToClientControl" x
-
-
-data ClientToServerControl
-  = ClientRegister UUID
-  | ClientDeRegister
-  deriving (Eq, Show, Generic)
-
-instance ToJSON ClientToServerControl where
-  toJSON x = case x of
-    ClientRegister y -> object ["register" .= y]
-    ClientDeRegister -> String "deregister"
-
-instance FromJSON ClientToServerControl where
-  parseJSON x = case x of
-    Object o -> ClientRegister <$> o .: "register"
-    String s
-      | s == "deregister" -> pure ClientDeRegister
-      | otherwise -> fail'
-    _ -> fail'
-    where
-      fail' = typeMismatch "ClientToServerControl" x
-
-
 data ChannelMsg
   = GeneratedInput TestTopic Value
   | Serialized TestTopic Value
@@ -105,6 +58,64 @@ instance FromJSON ChannelMsg where
           fai = Failure <$> o .: "topic" <*> o .: "failure"
       gen <|> ser <|> des <|> fai
     _ -> typeMismatch "ChannelMsg" x
+
+
+data ClientToServer
+  = GetTopics
+  | ClientToServer ChannelMsg
+  | ClientToServerBadParse Text
+  | Finished
+  deriving (Eq, Show, Generic)
+
+instance ToJSON ClientToServer where
+  toJSON x = case x of
+    GetTopics -> String "getTopics"
+    ClientToServer y -> object ["channelMsg" .= y]
+    ClientToServerBadParse y -> object ["badParse" .= y]
+    Finished -> String "finished"
+
+instance FromJSON ClientToServer where
+  parseJSON json = case json of
+    Object o -> do
+      let chn = ClientToServer <$> o .: "channelMsg"
+          bd = ClientToServerBadParse <$> o .: "badParse"
+      chn <|> bd
+    String s
+      | s == "getTopics" -> pure GetTopics
+      | s == "finished" -> pure Finished
+      | otherwise -> fail'
+    _ -> fail'
+    where
+      fail' = typeMismatch "ClientToServer" json
+
+
+data ServerToClient
+  = TopicsAvailable (Set TestTopic)
+  | ServerToClient ChannelMsg
+  | ServerToClientBadParse Text
+  | Continue
+  deriving (Eq, Show, Generic)
+
+instance ToJSON ServerToClient where
+  toJSON x = case x of
+    TopicsAvailable xs -> object ["topics" .= Set.toList xs]
+    ServerToClient y -> object ["channelMsg" .= y]
+    ServerToClientBadParse x -> object ["badParse" .= x]
+    Continue -> String "continue"
+
+instance FromJSON ServerToClient where
+  parseJSON x = case x of
+    Object o -> do
+      let available = TopicsAvailable . Set.fromList <$> o .: "topics"
+          badParse = ServerToClientBadParse <$> o .: "badParse"
+          channel = ServerToClient <$> o .: "channelMsg"
+      available <|> badParse <|> channel
+    String s
+      | s == "continue" -> pure Continue
+      | otherwise -> fail'
+    _ -> fail'
+    where
+      fail' = typeMismatch "ServerToClientControl" x
 
 
 
@@ -179,74 +190,164 @@ registerTopic topic p = do
     modifyTVar xsRef (Map.insert topic state)
 
 
+class IsOkay a where
+  isOkay :: a -> Bool
+
+instance IsOkay () where
+  isOkay () = True
+
 data HasTopic a
   = HasTopic a
   | NoTopic
+  deriving (Eq, Show, Generic)
+
+instance IsOkay a => IsOkay (HasTopic a) where
+  isOkay x = case x of
+    NoTopic -> False
+    HasTopic y -> isOkay y
 
 
 data GenValue a
   = DoneGenerating
   | GenValue a
+  deriving (Eq, Show, Generic)
+
+instance IsOkay a => IsOkay (GenValue a) where
+  isOkay x = case x of
+    DoneGenerating -> False
+    GenValue y -> isOkay y
 
 
 data GotClientGenValue a
   = NoClientGenValue
   | GotClientGenValue a
+  deriving (Eq, Show, Generic)
+
+instance IsOkay a => IsOkay (GotClientGenValue a) where
+  isOkay x = case x of
+    NoClientGenValue -> False
+    GotClientGenValue y -> isOkay y
 
 
 data HasClientG a
   = NoClientG
   | HasClientG a
+  deriving (Eq, Show, Generic)
+
+instance IsOkay a => IsOkay (HasClientG a) where
+  isOkay x = case x of
+    NoClientG -> False
+    HasClientG y -> isOkay y
 
 
 data HasServerG a
   = NoServerG
   | HasServerG a
+  deriving (Eq, Show, Generic)
+
+instance IsOkay a => IsOkay (HasServerG a) where
+  isOkay x = case x of
+    NoServerG -> False
+    HasServerG y -> isOkay y
 
 
 data HasServerS a
   = NoServerS
   | HasServerS a
+  deriving (Eq, Show, Generic)
+
+instance IsOkay a => IsOkay (HasServerS a) where
+  isOkay x = case x of
+    NoServerS -> False
+    HasServerS y -> isOkay y
 
 
 data HasServerD a
   = NoServerD
   | HasServerD a
+  deriving (Eq, Show, Generic)
+
+instance IsOkay a => IsOkay (HasServerD a) where
+  isOkay x = case x of
+    NoServerD -> False
+    HasServerD y -> isOkay y
 
 
 data HasClientD a
   = NoClientD
   | HasClientD a
+  deriving (Eq, Show, Generic)
+
+instance IsOkay a => IsOkay (HasClientD a) where
+  isOkay x = case x of
+    NoClientD -> False
+    HasClientD y -> isOkay y
 
 
 data DesValue a
   = CantDes String
   | DesValue a
+  deriving (Eq, Show, Generic)
+
+instance IsOkay a => IsOkay (DesValue a) where
+  isOkay x = case x of
+    CantDes _ -> False
+    DesValue y -> isOkay y
 
 
 data HasClientS a
   = NoClientS
   | HasClientS a
+  deriving (Eq, Show, Generic)
+
+instance IsOkay a => IsOkay (HasClientS a) where
+  isOkay x = case x of
+    NoClientS -> False
+    HasClientS y -> isOkay y
 
 
 data ServerSerializedMatch a
   = ServerSerializedMatch a
   | ServerSerializedMismatch
+  deriving (Eq, Show, Generic)
+
+instance IsOkay a => IsOkay (ServerSerializedMatch a) where
+  isOkay x = case x of
+    ServerSerializedMismatch -> False
+    ServerSerializedMatch y -> isOkay y
 
 
 data ServerDeSerializedMatch a
   = ServerDeSerializedMatch a
   | ServerDeSerializedMismatch
+  deriving (Eq, Show, Generic)
+
+instance IsOkay a => IsOkay (ServerDeSerializedMatch a) where
+  isOkay x = case x of
+    ServerDeSerializedMismatch -> False
+    ServerDeSerializedMatch y -> isOkay y
 
 
 data ClientSerializedMatch a
   = ClientSerializedMatch a
   | ClientSerializedMismatch
+  deriving (Eq, Show, Generic)
+
+instance IsOkay a => IsOkay (ClientSerializedMatch a) where
+  isOkay x = case x of
+    ClientSerializedMismatch -> False
+    ClientSerializedMatch y -> isOkay y
 
 
 data ClientDeSerializedMatch a
   = ClientDeSerializedMatch a
   | ClientDeSerializedMismatch
+  deriving (Eq, Show, Generic)
+
+instance IsOkay a => IsOkay (ClientDeSerializedMatch a) where
+  isOkay x = case x of
+    ClientDeSerializedMismatch -> False
+    ClientDeSerializedMatch y -> isOkay y
 
 
 getTopicState :: TestSuiteState
