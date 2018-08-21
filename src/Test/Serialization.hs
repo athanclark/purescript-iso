@@ -73,12 +73,11 @@ startServer ServerParams{..} = do
             Z.send addr server (err :| [])
             error $ show err
           Just (x :: ClientToServer) -> case x of
-            Finished -> liftIO $ putStrLn "success"
             GetTopics -> do
               ts <- liftIO $ registerClient serverParamsTestSuite serverStateRef addr
-              let outgoing = LBS.toStrict $ encode $ TopicsAvailable ts
-              Z.send addr server (outgoing :| [])
+              Z.sendJson addr server (TopicsAvailable ts)
             ClientToServerBadParse e -> error $ T.unpack e
+            Finished t -> liftIO $ putStrLn $ "success: " ++ show t -- FIXME compile report?
             ClientToServer msg -> case msg of
               GeneratedInput t y -> do
                 mSuiteState <- liftIO $ atomically $ getTestSuiteState serverStateRef addr
@@ -91,7 +90,7 @@ startServer ServerParams{..} = do
                         mOutgoing <- liftIO $ serializeValueClientOrigin suiteState t
                         case mOutgoing of
                           HasTopic (HasClientG outgoing) ->
-                            Z.send addr server (LBS.toStrict (encode outgoing) :| [])
+                            Z.sendJson addr server outgoing
                           _ -> error $ show mOutgoing
                       else error $ show mOk
               DeSerialized t y -> do
@@ -105,7 +104,7 @@ startServer ServerParams{..} = do
                         mOutgoing <- liftIO $ generateValue suiteState t
                         case mOutgoing of
                           HasTopic (GenValue outgoing) ->
-                            Z.send addr server (LBS.toStrict (encode outgoing) :| [])
+                            Z.sendJson addr server outgoing
                           _ -> error $ show mOutgoing
                       else error $ show mOk
               Serialized t y -> do
@@ -119,14 +118,14 @@ startServer ServerParams{..} = do
                         mOutgoing <- liftIO $ deserializeValueClientOrigin suiteState t
                         case mOutgoing of
                           HasTopic (HasClientS (DesValue outgoing)) -> do
-                            Z.send addr server (LBS.toStrict (encode outgoing) :| [])
+                            Z.sendJson addr server outgoing
                             mOk' <- liftIO $ verify suiteState t
                             if isOkay mOk'
-                              then Z.send addr server (LBS.toStrict (encode Continue) :| [])
+                              then Z.sendJson addr server (Continue t)
                               else error $ show mOk'
                           _ -> error $ show mOutgoing
                       else error $ show mOk
-              Failure t y -> error $ "Failure: " ++ show t ++ ", " ++ show y
+              Failure t y -> error $ "Failure: " ++ show t ++ ", " ++ show y -- TODO compile report
 
 
 

@@ -64,7 +64,7 @@ data ClientToServer
   = GetTopics
   | ClientToServer ChannelMsg
   | ClientToServerBadParse Text
-  | Finished
+  | Finished TestTopic
   deriving (Eq, Show, Generic)
 
 instance ToJSON ClientToServer where
@@ -72,17 +72,17 @@ instance ToJSON ClientToServer where
     GetTopics -> String "getTopics"
     ClientToServer y -> object ["channelMsg" .= y]
     ClientToServerBadParse y -> object ["badParse" .= y]
-    Finished -> String "finished"
+    Finished y -> object ["finished" .= y]
 
 instance FromJSON ClientToServer where
   parseJSON json = case json of
     Object o -> do
       let chn = ClientToServer <$> o .: "channelMsg"
           bd = ClientToServerBadParse <$> o .: "badParse"
-      chn <|> bd
+          fin = Finished <$> o .: "finished"
+      chn <|> bd <|> fin
     String s
       | s == "getTopics" -> pure GetTopics
-      | s == "finished" -> pure Finished
       | otherwise -> fail'
     _ -> fail'
     where
@@ -93,7 +93,7 @@ data ServerToClient
   = TopicsAvailable (Set TestTopic)
   | ServerToClient ChannelMsg
   | ServerToClientBadParse Text
-  | Continue
+  | Continue TestTopic
   deriving (Eq, Show, Generic)
 
 instance ToJSON ServerToClient where
@@ -101,7 +101,7 @@ instance ToJSON ServerToClient where
     TopicsAvailable xs -> object ["topics" .= Set.toList xs]
     ServerToClient y -> object ["channelMsg" .= y]
     ServerToClientBadParse x -> object ["badParse" .= x]
-    Continue -> String "continue"
+    Continue y -> object ["continue" .= y]
 
 instance FromJSON ServerToClient where
   parseJSON x = case x of
@@ -109,10 +109,8 @@ instance FromJSON ServerToClient where
       let available = TopicsAvailable . Set.fromList <$> o .: "topics"
           badParse = ServerToClientBadParse <$> o .: "badParse"
           channel = ServerToClient <$> o .: "channelMsg"
-      available <|> badParse <|> channel
-    String s
-      | s == "continue" -> pure Continue
-      | otherwise -> fail'
+          continue = Continue <$> o .: "continue"
+      available <|> badParse <|> channel <|> continue
     _ -> fail'
     where
       fail' = typeMismatch "ServerToClientControl" x
