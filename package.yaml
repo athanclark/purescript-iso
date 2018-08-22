@@ -32,6 +32,7 @@ dependencies:
 - strict
 - text
 - QuickCheck
+- quickcheck-instances
 - uuid
 - zeromq4-haskell
 - zeromq4-simple

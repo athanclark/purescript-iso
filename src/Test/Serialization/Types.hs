@@ -7,19 +7,23 @@
   , NamedFieldPuns
   , RecordWildCards
   , ExistentialQuantification
+  , GeneralizedNewtypeDeriving
   #-}
 
 module Test.Serialization.Types where
 
 import Data.Text (Text)
+import qualified Data.Text as T
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.UUID (UUID)
-import Data.Aeson (FromJSON (..), ToJSON (..), object, (.:), (.=), Value (Object, String))
+import Data.Aeson
+  (FromJSON (..), ToJSON (..), object, (.:), (.=), Value (..))
 import Data.Aeson.Types (typeMismatch, Parser, parseEither)
 import Data.Proxy (Proxy (..))
+import Data.String (IsString)
 import Control.Applicative ((<|>))
 import Control.Monad.Reader (ReaderT, ask)
 import Control.Monad.IO.Class (liftIO)
@@ -27,12 +31,31 @@ import Control.Concurrent.STM
   ( STM, TVar, TMVar, newTVar, newEmptyTMVar, atomically, modifyTVar, readTVar
   , putTMVar, tryReadTMVar, tryTakeTMVar)
 import Test.QuickCheck (Arbitrary (..))
-import Test.QuickCheck.Gen (Gen, unGen)
+import Test.QuickCheck.Gen (Gen, unGen, oneof, listOf1, elements)
 import Test.QuickCheck.Random (newQCGen)
+import Test.QuickCheck.Instances ()
 import GHC.Generics (Generic)
 
 
-type TestTopic = Text
+newtype TestTopic = TestTopic Text
+  deriving (IsString, Eq, Ord, Generic, Show, ToJSON, FromJSON)
+
+instance Arbitrary TestTopic where
+  arbitrary = TestTopic . T.pack <$> listOf1 (elements ['a' .. 'z'])
+
+
+instance Arbitrary Value where
+  arbitrary = oneof
+    [ pure Null
+    , Bool <$> arbitrary
+    , Number <$> arbitrary
+    , String <$> arbitraryNonEmptyText
+    , Array <$> arbitrary
+    , Object <$> arbitrary
+    ]
+    where
+      arbitraryNonEmptyText = T.pack <$> listOf1 (elements ['a' .. 'z'])
+
 
 
 data ChannelMsg
@@ -41,6 +64,14 @@ data ChannelMsg
   | DeSerialized TestTopic Value
   | Failure TestTopic Value
   deriving (Eq, Show, Generic)
+
+instance Arbitrary ChannelMsg where
+  arbitrary = oneof
+    [ GeneratedInput <$> arbitrary <*> arbitrary
+    , Serialized <$> arbitrary <*> arbitrary
+    , DeSerialized <$> arbitrary <*> arbitrary
+    , Failure <$> arbitrary <*> arbitrary
+    ]
 
 instance ToJSON ChannelMsg where
   toJSON x = case x of
@@ -66,6 +97,16 @@ data ClientToServer
   | ClientToServerBadParse Text
   | Finished TestTopic
   deriving (Eq, Show, Generic)
+
+instance Arbitrary ClientToServer where
+  arbitrary = oneof
+    [ pure GetTopics
+    , ClientToServer <$> arbitrary
+    , ClientToServerBadParse <$> arbitraryNonEmptyText
+    , Finished <$> arbitrary
+    ]
+    where
+      arbitraryNonEmptyText = T.pack <$> listOf1 (elements ['a' .. 'z'])
 
 instance ToJSON ClientToServer where
   toJSON x = case x of
@@ -95,6 +136,16 @@ data ServerToClient
   | ServerToClientBadParse Text
   | Continue TestTopic
   deriving (Eq, Show, Generic)
+
+instance Arbitrary ServerToClient where
+  arbitrary = oneof
+    [ TopicsAvailable <$> arbitrary
+    , ServerToClient <$> arbitrary
+    , ServerToClientBadParse <$> arbitraryNonEmptyText
+    , Continue <$> arbitrary
+    ]
+    where
+      arbitraryNonEmptyText = T.pack <$> listOf1 (elements ['a' .. 'z'])
 
 instance ToJSON ServerToClient where
   toJSON x = case x of
@@ -186,6 +237,7 @@ registerTopic topic p = do
   liftIO $ atomically $ do
     state <- emptyTestTopicState p
     modifyTVar xsRef (Map.insert topic state)
+
 
 
 class IsOkay a where

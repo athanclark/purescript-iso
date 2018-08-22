@@ -25,10 +25,11 @@ import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Strict.Maybe as Strict
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Set (Set)
+import qualified Data.Set as Set
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Aeson (decode, encode)
-import Control.Monad (forever, void)
+import Control.Monad (forever, void, when)
 import Control.Monad.Reader (runReaderT)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Control (liftBaseWith)
@@ -38,6 +39,7 @@ import Control.Concurrent.STM
 import System.ZMQ4.Monadic
   (runZMQ, Router (..), Dealer (..))
 import qualified System.ZMQ4.Simple as Z
+import System.Exit (exitSuccess)
 
 
 data ServerParams = ServerParams
@@ -46,8 +48,10 @@ data ServerParams = ServerParams
   }
 
 
+type TopicsPending = TVar (Set TestTopic)
+
 -- TODO client threads?
-type ServerState = TVar (Map Z.ZMQIdent TestSuiteState)
+type ServerState = TVar (Map Z.ZMQIdent (TestSuiteState, TopicsPending))
 
 emptyServerState :: STM ServerState
 emptyServerState = newTVar Map.empty
@@ -63,6 +67,13 @@ startServer ServerParams{..} = do
 
     serverStateRef <- liftIO (atomically emptyServerState)
 
+    liftIO $ do
+      suiteState <- atomically emptyTestSuiteState
+      runReaderT serverParamsTestSuite suiteState
+      ts <- Map.keysSet <$> atomically (readTVar suiteState)
+      when (ts == Set.empty) exitSuccess
+    
+
     forever $ do
       mIncoming <- Z.receive server
       case mIncoming of
@@ -77,8 +88,25 @@ startServer ServerParams{..} = do
               ts <- liftIO $ registerClient serverParamsTestSuite serverStateRef addr
               Z.sendJson addr server (TopicsAvailable ts)
             ClientToServerBadParse e -> error $ T.unpack e
-            Finished t -> liftIO $ putStrLn $ "success: " ++ show t -- FIXME compile report?
+            Finished t -> do
+              liftIO $ putStrLn $ "success: " ++ show t -- FIXME compile report?
+              mX <- liftIO $ atomically $ Map.lookup addr <$> readTVar serverStateRef
+              case mX of
+                Nothing -> error $ "No topic? " ++ show t
+                Just (_, pendingTopicsRef) -> do
+                  ts <- liftIO $ atomically $ readTVar pendingTopicsRef
+                  if ts == Set.empty
+                    then liftIO exitSuccess
+                    else liftIO $ atomically $ modifyTVar pendingTopicsRef $ Set.delete t
             ClientToServer msg -> case msg of
+              -- order:
+              -- clientG
+              -- serverS
+              -- clientD
+              -- serverG
+              -- clientS
+              -- serverD
+              -- verify
               GeneratedInput t y -> do
                 mSuiteState <- liftIO $ atomically $ getTestSuiteState serverStateRef addr
                 case mSuiteState of
@@ -103,8 +131,12 @@ startServer ServerParams{..} = do
                       then do
                         mOutgoing <- liftIO $ generateValue suiteState t
                         case mOutgoing of
-                          HasTopic (GenValue outgoing) ->
-                            Z.sendJson addr server outgoing
+                          HasTopic mOutgoing' -> case mOutgoing' of
+                            GenValue outgoing ->
+                              Z.sendJson addr server outgoing
+                            DoneGenerating -> pure ()
+                              -- FIXME should never occur - client dictates
+                              -- number of quickchecks
                           _ -> error $ show mOutgoing
                       else error $ show mOk
               Serialized t y -> do
@@ -119,6 +151,7 @@ startServer ServerParams{..} = do
                         case mOutgoing of
                           HasTopic (HasClientS (DesValue outgoing)) -> do
                             Z.sendJson addr server outgoing
+                            -- verify
                             mOk' <- liftIO $ verify suiteState t
                             if isOkay mOk'
                               then Z.sendJson addr server (Continue t)
@@ -131,7 +164,8 @@ startServer ServerParams{..} = do
 
 
 getTestSuiteState :: ServerState -> Z.ZMQIdent -> STM (Maybe TestSuiteState)
-getTestSuiteState serverState clientKey = Map.lookup clientKey <$> readTVar serverState
+getTestSuiteState serverState clientKey =
+  fmap fst . Map.lookup clientKey <$> readTVar serverState
 
 
 registerClient :: TestSuiteM ()
@@ -145,7 +179,8 @@ registerClient tests serverState clientKey = do
     Nothing -> do
       suiteState <- atomically $ do
         x <- emptyTestSuiteState
-        modifyTVar serverState (Map.insert clientKey x)
+        y <- newTVar Set.empty
+        modifyTVar serverState (Map.insert clientKey (x,y))
         pure x
       runReaderT tests suiteState
       Map.keysSet <$> atomically (readTVar suiteState)
