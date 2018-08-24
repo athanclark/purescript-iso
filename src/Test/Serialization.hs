@@ -3,6 +3,7 @@
   , OverloadedLists
   , RecordWildCards
   , ScopedTypeVariables
+  , DataKinds
   #-}
 
 module Test.Serialization where
@@ -22,13 +23,14 @@ import Data.UUID (UUID)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.ByteString.Lazy as LBS
+import qualified Data.ByteString.UTF8 as BS8
 import qualified Data.Strict.Maybe as Strict
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Aeson (decode, encode)
+import Data.Aeson (eitherDecode, encode)
 import Control.Monad (forever, void, when)
 import Control.Monad.Reader (runReaderT)
 import Control.Monad.IO.Class (liftIO)
@@ -37,7 +39,7 @@ import Control.Concurrent.Async (async, link, cancel)
 import Control.Concurrent.STM
   (STM, TVar, newTVar, atomically, modifyTVar, readTVar)
 import System.ZMQ4.Monadic
-  (runZMQ, Router (..), Dealer (..))
+  (ZMQ, runZMQ, Router (..), Dealer (..))
 import qualified System.ZMQ4.Simple as Z
 import System.Exit (exitSuccess)
 
@@ -78,24 +80,24 @@ startServer ServerParams{..} = do
       mIncoming <- Z.receive server
       case mIncoming of
         Nothing -> liftIO $ putStrLn $ "No incoming message?"
-        Just (addr :: Z.ZMQIdent, incoming :| _) -> case decode (LBS.fromStrict incoming) of
-          Nothing -> do
+        Just (addr :: Z.ZMQIdent, incoming :| _) -> case eitherDecode (LBS.fromStrict incoming) of
+          Left e -> do
             let err = LBS.toStrict $ encode $ ServerToClientBadParse $ T.decodeUtf8 incoming
             Z.send addr server (err :| [])
-            error $ show err
-          Just (x :: ClientToServer) -> case x of
+            error $ "Couldn't parse, sending `BadParse`: " ++ BS8.toString incoming ++ ", json error: " ++ e ++ ", original: " ++ BS8.toString incoming
+          Right (x :: ClientToServer) -> case x of
             GetTopics -> do
               ts <- liftIO $ registerClient serverParamsTestSuite serverStateRef addr
-              Z.sendJson addr server (TopicsAvailable ts)
+              send addr server (TopicsAvailable ts)
             ClientToServerBadParse e -> error $ T.unpack e
             Finished t -> do
               liftIO $ putStrLn $ "success: " ++ show t -- FIXME compile report?
               mX <- liftIO $ atomically $ Map.lookup addr <$> readTVar serverStateRef
               case mX of
-                Nothing -> error $ "No topic? " ++ show t
+                Nothing -> error $ "Received `Finished` from nonexistent topic? " ++ show t
                 Just (_, pendingTopicsRef) -> do
                   ts <- liftIO $ atomically $ readTVar pendingTopicsRef
-                  if ts == Set.empty
+                  if ts == Set.empty || ts == Set.singleton t
                     then liftIO exitSuccess
                     else liftIO $ atomically $ modifyTVar pendingTopicsRef $ Set.delete t
             ClientToServer msg -> case msg of
@@ -118,7 +120,7 @@ startServer ServerParams{..} = do
                         mOutgoing <- liftIO $ serializeValueClientOrigin suiteState t
                         case mOutgoing of
                           HasTopic (HasClientG outgoing) ->
-                            Z.sendJson addr server outgoing
+                            send addr server (ServerToClient outgoing)
                           _ -> error $ show mOutgoing
                       else error $ show mOk
               DeSerialized t y -> do
@@ -133,7 +135,7 @@ startServer ServerParams{..} = do
                         case mOutgoing of
                           HasTopic mOutgoing' -> case mOutgoing' of
                             GenValue outgoing ->
-                              Z.sendJson addr server outgoing
+                              send addr server (ServerToClient outgoing)
                             DoneGenerating -> pure ()
                               -- FIXME should never occur - client dictates
                               -- number of quickchecks
@@ -150,11 +152,11 @@ startServer ServerParams{..} = do
                         mOutgoing <- liftIO $ deserializeValueClientOrigin suiteState t
                         case mOutgoing of
                           HasTopic (HasClientS (DesValue outgoing)) -> do
-                            Z.sendJson addr server outgoing
+                            send addr server (ServerToClient outgoing)
                             -- verify
                             mOk' <- liftIO $ verify suiteState t
                             if isOkay mOk'
-                              then Z.sendJson addr server (Continue t)
+                              then send addr server (Continue t)
                               else error $ show mOk'
                           _ -> error $ show mOutgoing
                       else error $ show mOk
@@ -177,10 +179,13 @@ registerClient tests serverState clientKey = do
   case Map.lookup clientKey ss of
     Just _ -> error "Client key already taken"
     Nothing -> do
-      suiteState <- atomically $ do
-        x <- emptyTestSuiteState
-        y <- newTVar Set.empty
-        modifyTVar serverState (Map.insert clientKey (x,y))
-        pure x
+      suiteState <- atomically emptyTestSuiteState
       runReaderT tests suiteState
-      Map.keysSet <$> atomically (readTVar suiteState)
+      ks <- Map.keysSet <$> atomically (readTVar suiteState)
+      y <- atomically $ newTVar ks
+      atomically $ modifyTVar serverState (Map.insert clientKey (suiteState,y))
+      pure ks
+
+
+send :: Z.ZMQIdent -> Z.Socket z Router Dealer Z.Bound -> ServerToClient -> ZMQ z ()
+send addr server x = Z.sendJson addr server x

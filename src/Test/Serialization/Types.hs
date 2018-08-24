@@ -31,7 +31,7 @@ import Control.Concurrent.STM
   ( STM, TVar, TMVar, newTVar, newEmptyTMVar, atomically, modifyTVar, readTVar
   , putTMVar, tryReadTMVar, tryTakeTMVar)
 import Test.QuickCheck (Arbitrary (..))
-import Test.QuickCheck.Gen (Gen, unGen, oneof, listOf1, elements)
+import Test.QuickCheck.Gen (Gen, unGen, oneof, listOf1, elements, scale)
 import Test.QuickCheck.Random (newQCGen)
 import Test.QuickCheck.Instances ()
 import GHC.Generics (Generic)
@@ -45,15 +45,20 @@ instance Arbitrary TestTopic where
 
 
 instance Arbitrary Value where
-  arbitrary = oneof
-    [ pure Null
-    , Bool <$> arbitrary
-    , Number <$> arbitrary
-    , String <$> arbitraryNonEmptyText
-    , Array <$> arbitrary
-    , Object <$> arbitrary
-    ]
+  arbitrary =
+    oneof
+      [ termNull
+      , termNumber
+      , termBool
+      , termString
+      , scale (`div` 2) (Array <$> arbitrary)
+      , scale (`div` 2) (Object <$> arbitrary)
+      ]
     where
+      termNull = pure Null
+      termNumber = Number <$> arbitrary
+      termBool = Bool <$> arbitrary
+      termString = String <$> arbitraryNonEmptyText
       arbitraryNonEmptyText = T.pack <$> listOf1 (elements ['a' .. 'z'])
 
 
@@ -67,11 +72,13 @@ data ChannelMsg
 
 instance Arbitrary ChannelMsg where
   arbitrary = oneof
-    [ GeneratedInput <$> arbitrary <*> arbitrary
-    , Serialized <$> arbitrary <*> arbitrary
-    , DeSerialized <$> arbitrary <*> arbitrary
-    , Failure <$> arbitrary <*> arbitrary
+    [ GeneratedInput <$> arbitrary <*> arbitrary -- Json
+    , Serialized <$> arbitrary <*> arbitrary -- Json
+    , DeSerialized <$> arbitrary <*> arbitrary -- Json
+    , Failure <$> arbitrary <*> arbitrary -- Json
     ]
+    -- where
+    --   arbitraryJson = pure (String "foo")
 
 instance ToJSON ChannelMsg where
   toJSON x = case x of
