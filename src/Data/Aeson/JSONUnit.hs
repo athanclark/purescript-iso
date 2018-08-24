@@ -6,10 +6,14 @@ module Data.Aeson.JSONUnit where
 
 import Data.Aeson (ToJSON (..), FromJSON (..), Value (String))
 import Data.Aeson.Types (typeMismatch)
+import Test.QuickCheck (Arbitrary (..))
 
 
 data JSONUnit = JSONUnit
   deriving (Eq, Show)
+
+instance Arbitrary JSONUnit where
+  arbitrary = pure JSONUnit
 
 instance ToJSON JSONUnit where
   toJSON JSONUnit = String ""

@@ -2,6 +2,12 @@
     OverloadedStrings
   #-}
 
+import Data.Aeson.JSONUnit (JSONUnit)
+import Data.Aeson.JSONEither (JSONEither)
+import Data.Aeson.JSONTuple (JSONTuple)
+import Data.Time (UTCTime)
+import Data.Time.Calendar (Day)
+
 import Test.Serialization (ServerParams (..), startServer)
 import Test.Serialization.Types
   (TestSuiteM, registerTopic, ChannelMsg, ClientToServer, ServerToClient)
@@ -39,6 +45,11 @@ tests = do
   registerTopic "ChannelMsg" (Proxy :: Proxy ChannelMsg)
   registerTopic "ClientToServer" (Proxy :: Proxy ClientToServer)
   registerTopic "ServerToClient" (Proxy :: Proxy ServerToClient)
+  registerTopic "JSONUnit" (Proxy :: Proxy JSONUnit)
+  registerTopic "JSONEither" (Proxy :: Proxy (JSONEither JSONUnit JSONUnit))
+  registerTopic "JSONTuple" (Proxy :: Proxy (JSONTuple JSONUnit JSONUnit))
+  registerTopic "JSONDate" (Proxy :: Proxy Day)
+  -- registerTopic "JSONDateTime" (Proxy :: Proxy UTCTime)
 
 
 jsonIso :: ToJSON a => FromJSON a => Eq a => a -> Result

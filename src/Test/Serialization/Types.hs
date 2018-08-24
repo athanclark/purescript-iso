@@ -28,8 +28,8 @@ import Control.Applicative ((<|>))
 import Control.Monad.Reader (ReaderT, ask)
 import Control.Monad.IO.Class (liftIO)
 import Control.Concurrent.STM
-  ( STM, TVar, TMVar, newTVar, newEmptyTMVar, atomically, modifyTVar, readTVar
-  , putTMVar, tryReadTMVar, tryTakeTMVar)
+  ( STM, TVar, newTVar, atomically, modifyTVar, readTVar
+  , writeTVar)
 import Test.QuickCheck (Arbitrary (..))
 import Test.QuickCheck.Gen (Gen, unGen, oneof, listOf1, elements, scale)
 import Test.QuickCheck.Random (newQCGen)
@@ -186,12 +186,12 @@ data TestTopicState =
   , serialize :: a -> Value
   , deserialize :: Value -> Parser a
   , size    :: TVar Int
-  , serverG :: TMVar a
-  , clientS :: TMVar Value
-  , serverD :: TMVar a
-  , clientG :: TMVar a
-  , serverS :: TMVar Value
-  , clientD :: TMVar a
+  , serverG :: TVar (Maybe a)
+  , clientS :: TVar (Maybe Value)
+  , serverD :: TVar (Maybe a)
+  , clientG :: TVar (Maybe a)
+  , serverS :: TVar (Maybe Value)
+  , clientD :: TVar (Maybe a)
   }
 
 emptyTestTopicState :: forall a
@@ -202,12 +202,12 @@ emptyTestTopicState :: forall a
                        ) => Proxy a -> STM TestTopicState
 emptyTestTopicState Proxy = do
   size <- newTVar 1
-  (serverG :: TMVar a) <- newEmptyTMVar
-  clientS <- newEmptyTMVar
-  (serverD :: TMVar a) <- newEmptyTMVar
-  (clientG :: TMVar a) <- newEmptyTMVar
-  serverS <- newEmptyTMVar
-  (clientD :: TMVar a) <- newEmptyTMVar
+  (serverG :: TVar (Maybe a)) <- newTVar Nothing
+  clientS <- newTVar Nothing
+  (serverD :: TVar (Maybe a)) <- newTVar Nothing
+  (clientG :: TVar (Maybe a)) <- newTVar Nothing
+  serverS <- newTVar Nothing
+  (clientD :: TVar (Maybe a)) <- newTVar Nothing
   pure TestTopicState
     { size
     , serverG
@@ -433,7 +433,7 @@ generateValue xsRef topic = do
           let val = unGen generate g s
           atomically $ do
             modifyTVar size (+ 1)
-            putTMVar serverG val
+            writeTVar serverG $ Just val
           pure $ GenValue $ GeneratedInput topic $ serialize val
 
 
@@ -449,7 +449,7 @@ gotClientGenValue xsRef topic value = do
       case parseEither deserialize value of
         Left e -> pure (CantDes e)
         Right y -> do
-          atomically (putTMVar clientG y)
+          atomically $ writeTVar clientG $ Just y
           pure (DesValue ())
 
 
@@ -461,12 +461,12 @@ serializeValueClientOrigin xsRef topic = do
   case mState of
     NoTopic -> pure NoTopic
     HasTopic (TestTopicState{serialize,clientG,serverS}) -> fmap HasTopic $ do
-      mX <- atomically (tryReadTMVar clientG)
+      mX <- atomically (readTVar clientG)
       case mX of
         Nothing -> pure NoClientG
         Just x -> fmap HasClientG $ do
           let val = serialize x
-          atomically $ putTMVar serverS val
+          atomically $ writeTVar serverS $ Just val
           pure $ Serialized topic val
 
 
@@ -479,7 +479,7 @@ gotClientSerialize xsRef topic value = do
   case mState of
     NoTopic -> pure NoTopic
     HasTopic (TestTopicState{deserialize,clientS}) -> fmap HasTopic $ do
-      atomically (putTMVar clientS value)
+      atomically $ writeTVar clientS $ Just value
       pure ()
 
 
@@ -491,13 +491,13 @@ deserializeValueClientOrigin xsRef topic = do
   case mState of
     NoTopic -> pure NoTopic
     HasTopic (TestTopicState{deserialize,clientS,serverD,serialize}) -> fmap HasTopic $ do
-      mX <- atomically (tryReadTMVar clientS)
+      mX <- atomically (readTVar clientS)
       case mX of
         Nothing -> pure NoClientS
         Just x -> fmap HasClientS $ case parseEither deserialize x of
           Left e -> pure (CantDes e)
           Right y -> do
-            atomically (putTMVar serverD y)
+            atomically $ writeTVar serverD $ Just y
             pure $ DesValue $ DeSerialized topic $ serialize y
 
 
@@ -513,7 +513,7 @@ gotClientDeSerialize xsRef topic value = do
       case parseEither deserialize value of
         Left e -> pure (CantDes e)
         Right y -> do
-          atomically (putTMVar clientD y)
+          atomically $ writeTVar clientD $ Just y
           pure (DesValue ())
 
 
@@ -538,18 +538,18 @@ verify xsRef topic = do
   case mState of
     NoTopic -> pure NoTopic
     HasTopic TestTopicState{..} -> fmap HasTopic $ do
-      mServerG <- atomically (tryTakeTMVar serverG)
+      mServerG <- atomically (readTVar serverG)
       case mServerG of
         Nothing -> pure NoServerG
         Just serverG' -> fmap HasServerG $ do
-          mClientS <- atomically (tryTakeTMVar clientS)
+          mClientS <- atomically (readTVar clientS)
           case mClientS of
             Nothing -> pure NoClientS
             Just clientS' -> fmap HasClientS $ do
               if serialize serverG' /= clientS'
                 then pure ServerSerializedMismatch
                 else fmap ServerSerializedMatch $ do
-                  mServerD <- atomically (tryTakeTMVar serverD)
+                  mServerD <- atomically (readTVar serverD)
                   case mServerD of
                     Nothing -> pure NoServerD
                     Just serverD' -> fmap HasServerD $ do
@@ -558,18 +558,18 @@ verify xsRef topic = do
                         Right serverD''
                           | serverD'' /= serverD' -> pure (DesValue ServerDeSerializedMismatch)
                           | otherwise -> fmap (DesValue . ServerDeSerializedMatch) $ do
-                              mClientG <- atomically (tryTakeTMVar clientG)
+                              mClientG <- atomically (readTVar clientG)
                               case mClientG of
                                 Nothing -> pure NoClientG
                                 Just clientG' -> fmap HasClientG $ do
-                                  mServerS <- atomically (tryTakeTMVar serverS)
+                                  mServerS <- atomically (readTVar serverS)
                                   case mServerS of
                                     Nothing -> pure NoServerS
                                     Just serverS' -> fmap HasServerS $ do
                                       if serialize clientG' /= serverS'
                                         then pure ClientSerializedMismatch
                                         else fmap ClientSerializedMatch $ do
-                                          mClientD <- atomically (tryTakeTMVar clientD)
+                                          mClientD <- atomically (readTVar clientD)
                                           case mClientD of
                                             Nothing -> pure NoClientD
                                             Just clientD' -> fmap HasClientD $ do
@@ -577,5 +577,6 @@ verify xsRef topic = do
                                                 Left e -> pure (CantDes e)
                                                 Right serverS''
                                                   | serverS'' /= clientD' -> pure (DesValue ClientDeSerializedMismatch)
-                                                  | otherwise -> fmap (DesValue . ClientDeSerializedMatch) $ pure ()
+                                                  | otherwise -> do
+                                                      fmap (DesValue . ClientDeSerializedMatch) $ pure ()
 
