@@ -1,5 +1,5 @@
 name:                purescript-iso
-version:             0.0.1.1
+version:             0.0.1.2
 git:                 "git://git.localcooking.com/tooling/purescript-iso.git"
 license:             BSD3
 author:              "Athan Clark"
