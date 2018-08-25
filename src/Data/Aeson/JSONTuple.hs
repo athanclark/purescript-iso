@@ -1,5 +1,6 @@
 {-# LANGUAGE
     OverloadedStrings
+  , DeriveGeneric
   #-}
 
 module Data.Aeson.JSONTuple where
@@ -7,10 +8,11 @@ module Data.Aeson.JSONTuple where
 import Data.Aeson (ToJSON (..), FromJSON (..), Value (Object), object, (.=), (.:))
 import Data.Aeson.Types (typeMismatch)
 import Test.QuickCheck (Arbitrary (..))
+import GHC.Generics (Generic)
 
 
 data JSONTuple a b = JSONTuple a b
-  deriving (Eq, Show)
+  deriving (Eq, Ord, Show, Generic)
 
 instance (ToJSON a, ToJSON b) => ToJSON (JSONTuple a b) where
   toJSON (JSONTuple a b) = object ["l" .= a, "r" .= b]

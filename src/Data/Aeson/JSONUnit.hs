@@ -1,5 +1,6 @@
 {-# LANGUAGE
     OverloadedStrings
+  , DeriveGeneric
   #-}
 
 module Data.Aeson.JSONUnit where
@@ -7,10 +8,11 @@ module Data.Aeson.JSONUnit where
 import Data.Aeson (ToJSON (..), FromJSON (..), Value (String))
 import Data.Aeson.Types (typeMismatch)
 import Test.QuickCheck (Arbitrary (..))
+import GHC.Generics (Generic)
 
 
 data JSONUnit = JSONUnit
-  deriving (Eq, Show)
+  deriving (Eq, Ord, Show, Generic)
 
 instance Arbitrary JSONUnit where
   arbitrary = pure JSONUnit

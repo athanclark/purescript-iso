@@ -31,6 +31,7 @@ dependencies:
 - stm
 - strict
 - text
+- time
 - QuickCheck
 - quickcheck-instances
 - utf8-string
