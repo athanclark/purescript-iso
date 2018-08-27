@@ -32,7 +32,5 @@ jsonDateTime now =
 
 instance Arbitrary JSONDateTime where
   arbitrary =
-    let go = unsafePerformIO $ do
-          now <- getCurrentTime
-          pure (jsonDateTime now)
+    let go = unsafePerformIO (jsonDateTime <$> getCurrentTime)
     in  go `seq` pure go

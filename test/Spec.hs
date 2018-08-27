@@ -6,6 +6,7 @@ import Data.Aeson.JSONUnit (JSONUnit)
 import Data.Aeson.JSONEither (JSONEither)
 import Data.Aeson.JSONTuple (JSONTuple)
 import Data.Aeson.JSONDateTime (JSONDateTime)
+import Data.Aeson.JSONString (JSONString)
 import Data.Time (UTCTime)
 import Data.Time.Calendar (Day)
 
@@ -51,6 +52,7 @@ tests = do
   registerTopic "JSONTuple" (Proxy :: Proxy (JSONTuple JSONUnit JSONUnit))
   registerTopic "JSONDate" (Proxy :: Proxy Day)
   registerTopic "JSONDateTime" (Proxy :: Proxy JSONDateTime)
+  registerTopic "JSONString" (Proxy :: Proxy JSONString)
 
 
 jsonIso :: ToJSON a => FromJSON a => Eq a => a -> Result

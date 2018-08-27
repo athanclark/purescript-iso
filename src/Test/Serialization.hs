@@ -10,9 +10,9 @@
 module Test.Serialization where
 
 import Test.Serialization.Types
-  ( TestSuiteM, ChannelMsg (..), ServerToClient (..), TestTopic
+  ( TestSuiteM, MsgType (..), ServerToClient (..), TestTopic
   , ClientToServer (..), TestSuiteState, TestTopicState (..), emptyTestSuiteState
-  , gotClientGenValue, serializeValueClientOrigin
+  , gotClientGenValue, serializeValueClientOrigin, getTopicState
   , gotClientSerialize, gotClientDeSerialize
   , deserializeValueClientOrigin, verify, generateValue, getTopicState
   , HasTopic (..), DesValue (..), HasClientG (..), GenValue (..)
@@ -23,6 +23,7 @@ import Data.URI.Auth (URIAuth)
 import Data.UUID (UUID)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
+import Data.ByteString (ByteString)
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.UTF8 as BS8
 import qualified Data.Strict.Maybe as Strict
@@ -31,14 +32,14 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Aeson (eitherDecode, encode)
+import Data.Aeson (eitherDecode, encode, toJSON)
 import Control.Monad (forever, void, when)
 import Control.Monad.Reader (runReaderT)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Control (liftBaseWith)
 import Control.Concurrent.Async (async, link, cancel)
 import Control.Concurrent.STM
-  (STM, TVar, newTVar, atomically, modifyTVar, readTVar)
+  (STM, TVar, newTVar, atomically, modifyTVar, readTVar, writeTVar)
 import System.ZMQ4.Monadic
   (ZMQ, runZMQ, Router (..), Dealer (..))
 import qualified System.ZMQ4.Simple as Z
@@ -89,7 +90,7 @@ startServer ServerParams{..} = do
           Right (x :: ClientToServer) -> case x of
             GetTopics -> do
               ts <- liftIO $ registerClient serverParamsTestSuite serverStateRef addr
-              send addr server (TopicsAvailable ts)
+              () <$ send addr server (TopicsAvailable ts)
             ClientToServerBadParse e -> error $ T.unpack e
             Finished t -> do
               liftIO $ putStrLn $ "success: " ++ show t -- FIXME compile report?
@@ -101,83 +102,69 @@ startServer ServerParams{..} = do
                   if ts == Set.empty || ts == Set.singleton t
                     then liftIO exitSuccess
                     else liftIO $ atomically $ modifyTVar pendingTopicsRef $ Set.delete t
-            ClientToServer msg -> case msg of
-              -- order:
-              -- clientG
-              -- serverS
-              -- clientD
-              -- serverG
-              -- clientS
-              -- serverD
-              -- verify
-              GeneratedInput t y -> do
-                mSuiteState <- liftIO $ atomically $ getTestSuiteState serverStateRef addr
-                case mSuiteState of
-                  Nothing -> error "No test suite state!"
-                  Just suiteState -> do
-                    mOk <- liftIO $ gotClientGenValue suiteState t y
-                    if isOkay mOk
-                      then do
-                        mOutgoing <- liftIO $ serializeValueClientOrigin suiteState t
-                        case mOutgoing of
-                          HasTopic (HasClientG outgoing) ->
-                            send addr server (ServerToClient outgoing)
-                          _ -> do
-                            liftIO $ dumpTopic serverStateRef addr t
-                            error $ "Bad serialize: " ++ show t ++ ", " ++ show mOutgoing
-                      else do
+            -- order:
+            -- clientG
+            -- serverS
+            -- clientD
+            -- serverG
+            -- clientS
+            -- serverD
+            -- verify
+            ClientToServer t m y -> do
+              mSuiteState <- liftIO $ atomically $ getTestSuiteState serverStateRef addr
+              case mSuiteState of
+                Nothing -> error "No test suite state!"
+                Just suiteState -> do
+                  mState <- liftIO $ getTopicState suiteState t
+                  case mState of
+                    NoTopic -> error "No topic"
+                    HasTopic state -> case m of
+                      Failure -> do
                         liftIO $ dumpTopic serverStateRef addr t
-                        error $ "Bad got gen: " ++ show t ++ ", " ++ show mOk
-              DeSerialized t y -> do
-                mSuiteState <- liftIO $ atomically $ getTestSuiteState serverStateRef addr
-                case mSuiteState of
-                  Nothing -> error "No test suite state!"
-                  Just suiteState -> do
-                    mOk <- liftIO $ gotClientDeSerialize suiteState t y
-                    if isOkay mOk
-                      then do
-                        mOutgoing <- liftIO $ generateValue suiteState t
-                        case mOutgoing of
-                          HasTopic mOutgoing' -> case mOutgoing' of
-                            GenValue outgoing ->
-                              send addr server (ServerToClient outgoing)
-                            DoneGenerating -> pure ()
-                              -- FIXME should never occur - client dictates
-                              -- number of quickchecks
-                          _ -> do
-                            liftIO $ dumpTopic serverStateRef addr t
-                            error $ "Bad generate value: " ++ show t ++ ", " ++ show mOutgoing
-                      else do
-                        liftIO $ dumpTopic serverStateRef addr t
-                        error $ "Bad got deserialize: " ++ show t ++ ", " ++ show mOk
-              Serialized t y -> do
-                mSuiteState <- liftIO $ atomically $ getTestSuiteState serverStateRef addr
-                case mSuiteState of
-                  Nothing -> error "No test suite state!"
-                  Just suiteState -> do
-                    mOk <- liftIO $ gotClientSerialize suiteState t y
-                    if isOkay mOk
-                      then do
-                        mOutgoing <- liftIO $ deserializeValueClientOrigin suiteState t
-                        case mOutgoing of
-                          HasTopic (HasClientS (DesValue outgoing)) -> do
-                            send addr server (ServerToClient outgoing)
-                            -- verify
-                            mOk' <- liftIO $ verify suiteState t
-                            if isOkay mOk'
-                              then send addr server (Continue t)
-                              else do
-                                liftIO $ dumpTopic serverStateRef addr t
-                                error $ "Bad verify: " ++ show t ++ ", " ++ show mOk'
-                          _ -> do
-                            liftIO $ dumpTopic serverStateRef addr t
-                            error $ "Bad deserialize value: " ++ show t ++ ", " ++ show mOutgoing
-                      else do
-                        liftIO $ dumpTopic serverStateRef addr t
-                        error $ "Bad got serialize: " ++ show t ++ ", " ++ show mOk
-              Failure t y -> do
-                liftIO $ dumpTopic serverStateRef addr t
-                error $ "Failure: " ++ show t ++ ", " ++ show y -- TODO compile report
+                        error $ "Failure: " ++ show t ++ ", " ++ show y -- TODO compile report
+                      GeneratedInput -> do
+                        liftIO $ atomically $ writeTVar (clientGReceived state) (Just incoming)
+                        mOk <- liftIO $ gotClientGenValue state y
+                        if isOkay mOk
+                          then do
+                            mOutgoing <- liftIO $ serializeValueClientOrigin state t
+                            case mOutgoing of
+                              HasClientG outgoing -> do
+                                o' <- send addr server outgoing
+                                liftIO $ atomically $ writeTVar (serverSSent state) (Just o')
+                              _ -> fail' serverStateRef server "Bad serialize: " addr t mOutgoing
+                          else fail' serverStateRef server "Bad got gen: " addr t mOk
+                      DeSerialized -> do
+                        liftIO $ atomically $ writeTVar (clientDReceived state) (Just incoming)
+                        mOk <- liftIO $ gotClientDeSerialize state y
+                        if isOkay mOk
+                          then do
+                            mOutgoing <- liftIO $ generateValue state t
+                            case mOutgoing of
+                              GenValue outgoing -> do
+                                o' <- send addr server outgoing
+                                liftIO $ atomically $ writeTVar (serverGSent state) (Just o')
+                              DoneGenerating -> pure ()
+                                -- FIXME should never occur - client dictates
+                                -- number of quickchecks
+                          else fail' serverStateRef server "Bad got deserialize: " addr t mOk
+                      Serialized -> do
+                        liftIO $ atomically $ writeTVar (clientSReceived state) (Just incoming)
+                        mOk <- liftIO $ gotClientSerialize state y
+                        if isOkay mOk
+                          then do
+                            mOutgoing <- liftIO $ deserializeValueClientOrigin state t
+                            case mOutgoing of
+                              HasClientS (DesValue outgoing) -> do
+                                o' <- send addr server outgoing
+                                liftIO $ atomically $ writeTVar (serverDSent state) (Just o')
+                                -- verify
+                                mOk' <- liftIO $ verify state
+                                if isOkay mOk'
+                                  then () <$ send addr server (Continue t)
+                                  else fail' serverStateRef server "Bad verify: " addr t mOk'
+                              _ -> fail' serverStateRef server "Bad deserialize value: " addr t mOutgoing
+                          else fail' serverStateRef server "Bad got serialize: " addr t mOk
 
 
 
@@ -204,8 +191,25 @@ registerClient tests serverState clientKey = do
       pure ks
 
 
-send :: Z.ZMQIdent -> Z.Socket z Router Dealer Z.Bound -> ServerToClient -> ZMQ z ()
-send addr server x = Z.sendJson addr server x
+fail' :: Show a
+      => ServerState
+      -> Z.Socket z Router Dealer Z.Bound
+      -> String
+      -> Z.ZMQIdent
+      -> TestTopic
+      -> a
+      -> ZMQ z ()
+fail' serverStateRef server prefix addr t v = do
+  liftIO $ dumpTopic serverStateRef addr t
+  _ <- send addr server $ ServerToClient t Failure $ toJSON $ show v
+  error $ prefix ++ show t ++ ", " ++ show v
+
+
+send :: Z.ZMQIdent -> Z.Socket z Router Dealer Z.Bound -> ServerToClient -> ZMQ z ByteString
+send addr server x = do
+  let x' = LBS.toStrict (encode x)
+  Z.send addr server (x' :| [])
+  pure x'
 
 
 

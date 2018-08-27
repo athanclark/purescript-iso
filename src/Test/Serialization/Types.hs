@@ -14,11 +14,11 @@ module Test.Serialization.Types where
 
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.ByteString (ByteString)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.UUID (UUID)
 import Data.Aeson
   (FromJSON (..), ToJSON (..), object, (.:), (.=), Value (..))
 import Data.Aeson.Types (typeMismatch, Parser, parseEither)
@@ -63,44 +63,45 @@ instance Arbitrary Value where
 
 
 
-data ChannelMsg
-  = GeneratedInput TestTopic Value
-  | Serialized TestTopic Value
-  | DeSerialized TestTopic Value
-  | Failure TestTopic Value
+data MsgType
+  = GeneratedInput
+  | Serialized
+  | DeSerialized
+  | Failure
   deriving (Eq, Show, Generic)
 
-instance Arbitrary ChannelMsg where
+instance Arbitrary MsgType where
   arbitrary = oneof
-    [ GeneratedInput <$> arbitrary <*> arbitrary -- Json
-    , Serialized <$> arbitrary <*> arbitrary -- Json
-    , DeSerialized <$> arbitrary <*> arbitrary -- Json
-    , Failure <$> arbitrary <*> arbitrary -- Json
+    [ pure GeneratedInput
+    , pure Serialized
+    , pure DeSerialized
+    , pure Failure
     ]
-    -- where
-    --   arbitraryJson = pure (String "foo")
 
-instance ToJSON ChannelMsg where
-  toJSON x = case x of
-    GeneratedInput t y -> object ["topic" .= t, "generated" .= y]
-    Serialized t y -> object ["topic" .= t, "serialized" .= y]
-    DeSerialized t y -> object ["topic" .= t, "deserialized" .= y]
-    Failure t y -> object ["topic" .= t, "failure" .= y]
+instance ToJSON MsgType where
+  toJSON x = String $ case x of
+    GeneratedInput -> "generated"
+    Serialized -> "serialized"
+    DeSerialized -> "deserialized"
+    Failure -> "failure"
 
-instance FromJSON ChannelMsg where
+instance FromJSON MsgType where
   parseJSON x = case x of
-    Object o -> do
-      let gen = GeneratedInput <$> o .: "topic" <*> o .: "generated"
-          ser = Serialized <$> o .: "topic" <*> o .: "serialized"
-          des = DeSerialized <$> o .: "topic" <*> o .: "deserialized"
-          fai = Failure <$> o .: "topic" <*> o .: "failure"
-      gen <|> ser <|> des <|> fai
-    _ -> typeMismatch "ChannelMsg" x
+    String s
+      | s == "generated" -> pure GeneratedInput
+      | s == "serialized" -> pure Serialized
+      | s == "deserialized" -> pure DeSerialized
+      | s == "failure" -> pure Failure
+      | otherwise -> fail'
+    _ -> fail'
+    where
+      fail' = typeMismatch "MsgType" x
+
 
 
 data ClientToServer
   = GetTopics
-  | ClientToServer ChannelMsg
+  | ClientToServer TestTopic MsgType Value
   | ClientToServerBadParse Text
   | Finished TestTopic
   deriving (Eq, Show, Generic)
@@ -108,7 +109,7 @@ data ClientToServer
 instance Arbitrary ClientToServer where
   arbitrary = oneof
     [ pure GetTopics
-    , ClientToServer <$> arbitrary
+    , ClientToServer <$> arbitrary <*> arbitrary <*> arbitrary
     , ClientToServerBadParse <$> arbitraryNonEmptyText
     , Finished <$> arbitrary
     ]
@@ -118,14 +119,14 @@ instance Arbitrary ClientToServer where
 instance ToJSON ClientToServer where
   toJSON x = case x of
     GetTopics -> String "getTopics"
-    ClientToServer y -> object ["channelMsg" .= y]
+    ClientToServer t m y -> object ["topic" .= t, "msgType" .= m, "value" .= y]
     ClientToServerBadParse y -> object ["badParse" .= y]
     Finished y -> object ["finished" .= y]
 
 instance FromJSON ClientToServer where
   parseJSON json = case json of
     Object o -> do
-      let chn = ClientToServer <$> o .: "channelMsg"
+      let chn = ClientToServer <$> o .: "topic" <*> o .: "msgType" <*> o .: "value"
           bd = ClientToServerBadParse <$> o .: "badParse"
           fin = Finished <$> o .: "finished"
       chn <|> bd <|> fin
@@ -139,7 +140,7 @@ instance FromJSON ClientToServer where
 
 data ServerToClient
   = TopicsAvailable (Set TestTopic)
-  | ServerToClient ChannelMsg
+  | ServerToClient TestTopic MsgType Value
   | ServerToClientBadParse Text
   | Continue TestTopic
   deriving (Eq, Show, Generic)
@@ -147,7 +148,7 @@ data ServerToClient
 instance Arbitrary ServerToClient where
   arbitrary = oneof
     [ TopicsAvailable <$> arbitrary
-    , ServerToClient <$> arbitrary
+    , ServerToClient <$> arbitrary <*> arbitrary <*> arbitrary
     , ServerToClientBadParse <$> arbitraryNonEmptyText
     , Continue <$> arbitrary
     ]
@@ -157,8 +158,8 @@ instance Arbitrary ServerToClient where
 instance ToJSON ServerToClient where
   toJSON x = case x of
     TopicsAvailable xs -> object ["topics" .= Set.toList xs]
-    ServerToClient y -> object ["channelMsg" .= y]
-    ServerToClientBadParse x -> object ["badParse" .= x]
+    ServerToClient t m y -> object ["topic" .= t, "msgType" .= m, "value" .= y]
+    ServerToClientBadParse y -> object ["badParse" .= y]
     Continue y -> object ["continue" .= y]
 
 instance FromJSON ServerToClient where
@@ -166,7 +167,7 @@ instance FromJSON ServerToClient where
     Object o -> do
       let available = TopicsAvailable . Set.fromList <$> o .: "topics"
           badParse = ServerToClientBadParse <$> o .: "badParse"
-          channel = ServerToClient <$> o .: "channelMsg"
+          channel = ServerToClient <$> o .: "topic" <*> o .: "msgType" <*> o .: "value"
           continue = Continue <$> o .: "continue"
       available <|> badParse <|> channel <|> continue
     _ -> fail'
@@ -187,11 +188,17 @@ data TestTopicState =
   , deserialize :: Value -> Parser a
   , size    :: TVar Int
   , serverG :: TVar (Maybe a)
+  , serverGSent :: TVar (Maybe ByteString)
   , clientS :: TVar (Maybe Value)
+  , clientSReceived :: TVar (Maybe ByteString)
   , serverD :: TVar (Maybe a)
+  , serverDSent :: TVar (Maybe ByteString)
   , clientG :: TVar (Maybe a)
+  , clientGReceived :: TVar (Maybe ByteString)
   , serverS :: TVar (Maybe Value)
+  , serverSSent :: TVar (Maybe ByteString)
   , clientD :: TVar (Maybe a)
+  , clientDReceived :: TVar (Maybe ByteString)
   }
 
 emptyTestTopicState :: forall a
@@ -203,19 +210,31 @@ emptyTestTopicState :: forall a
 emptyTestTopicState Proxy = do
   size <- newTVar 1
   (serverG :: TVar (Maybe a)) <- newTVar Nothing
+  serverGSent <- newTVar Nothing
   clientS <- newTVar Nothing
+  clientSReceived <- newTVar Nothing
   (serverD :: TVar (Maybe a)) <- newTVar Nothing
+  serverDSent <- newTVar Nothing
   (clientG :: TVar (Maybe a)) <- newTVar Nothing
+  clientGReceived <- newTVar Nothing
   serverS <- newTVar Nothing
+  serverSSent <- newTVar Nothing
   (clientD :: TVar (Maybe a)) <- newTVar Nothing
+  clientDReceived <- newTVar Nothing
   pure TestTopicState
     { size
     , serverG
+    , serverGSent
     , clientS
+    , clientSReceived
     , serverD
+    , serverDSent
     , clientG
+    , clientGReceived
     , serverS
+    , serverSSent
     , clientD
+    , clientDReceived
     , generate = arbitrary
     , serialize = toJSON
     , deserialize = parseJSON
@@ -417,166 +436,142 @@ getTopicState xsRef topic = do
     Just x -> pure (HasTopic x)
 
 
-generateValue :: TestSuiteState
+generateValue :: TestTopicState
               -> TestTopic
-              -> IO (HasTopic (GenValue ChannelMsg))
-generateValue xsRef topic = do
-  mState <- getTopicState xsRef topic
-  case mState of
-    NoTopic -> pure NoTopic
-    HasTopic (TestTopicState{size,generate,serialize,serverG}) -> fmap HasTopic $ do
-      s <- atomically (readTVar size)
-      if s >= 100
-        then pure DoneGenerating
-        else do
-          g <- newQCGen
-          let val = unGen generate g s
-          atomically $ do
-            modifyTVar size (+ 1)
-            writeTVar serverG $ Just val
-          pure $ GenValue $ GeneratedInput topic $ serialize val
+              -> IO (GenValue ServerToClient)
+generateValue TestTopicState{size,generate,serialize,serverG} topic = do
+  s <- atomically (readTVar size)
+  if s >= 100
+    then pure DoneGenerating
+    else do
+      g <- newQCGen
+      let val = unGen generate g s
+      atomically $ do
+        modifyTVar size (+ 1)
+        writeTVar serverG $ Just val
+      pure $ GenValue $ ServerToClient topic GeneratedInput $ serialize val
 
 
-gotClientGenValue :: TestSuiteState
-                  -> TestTopic
+gotClientGenValue :: TestTopicState
                   -> Value
-                  -> IO (HasTopic (DesValue ()))
-gotClientGenValue xsRef topic value = do
-  mState <- getTopicState xsRef topic
-  case mState of
-    NoTopic -> pure NoTopic
-    HasTopic (TestTopicState{deserialize,clientG}) -> fmap HasTopic $ do
-      case parseEither deserialize value of
-        Left e -> pure (CantDes e)
-        Right y -> do
-          atomically $ writeTVar clientG $ Just y
-          pure (DesValue ())
+                  -> IO (DesValue ())
+gotClientGenValue TestTopicState{deserialize,clientG} value = do
+  case parseEither deserialize value of
+    Left e -> pure (CantDes e)
+    Right y -> do
+      atomically $ writeTVar clientG $ Just y
+      pure (DesValue ())
 
 
-serializeValueClientOrigin :: TestSuiteState
+serializeValueClientOrigin :: TestTopicState
                            -> TestTopic
-                           -> IO (HasTopic (HasClientG ChannelMsg))
-serializeValueClientOrigin xsRef topic = do
-  mState <- getTopicState xsRef topic
-  case mState of
-    NoTopic -> pure NoTopic
-    HasTopic (TestTopicState{serialize,clientG,serverS}) -> fmap HasTopic $ do
-      mX <- atomically (readTVar clientG)
-      case mX of
-        Nothing -> pure NoClientG
-        Just x -> fmap HasClientG $ do
-          let val = serialize x
-          atomically $ writeTVar serverS $ Just val
-          pure $ Serialized topic val
+                           -> IO (HasClientG ServerToClient)
+serializeValueClientOrigin TestTopicState{serialize,clientG,serverS} topic = do
+  mX <- atomically (readTVar clientG)
+  case mX of
+    Nothing -> pure NoClientG
+    Just x -> fmap HasClientG $ do
+      let val = serialize x
+      atomically $ writeTVar serverS $ Just val
+      pure $ ServerToClient topic Serialized val
 
 
-gotClientSerialize :: TestSuiteState
-                   -> TestTopic
+gotClientSerialize :: TestTopicState
                    -> Value
-                   -> IO (HasTopic ())
-gotClientSerialize xsRef topic value = do
-  mState <- getTopicState xsRef topic
-  case mState of
-    NoTopic -> pure NoTopic
-    HasTopic (TestTopicState{deserialize,clientS}) -> fmap HasTopic $ do
-      atomically $ writeTVar clientS $ Just value
-      pure ()
+                   -> IO ()
+gotClientSerialize TestTopicState{clientS} value = do
+  atomically $ writeTVar clientS $ Just value
 
 
-deserializeValueClientOrigin :: TestSuiteState
+deserializeValueClientOrigin :: TestTopicState
                              -> TestTopic
-                             -> IO (HasTopic (HasClientS (DesValue ChannelMsg)))
-deserializeValueClientOrigin xsRef topic = do
-  mState <- getTopicState xsRef topic
-  case mState of
-    NoTopic -> pure NoTopic
-    HasTopic (TestTopicState{deserialize,clientS,serverD,serialize}) -> fmap HasTopic $ do
-      mX <- atomically (readTVar clientS)
-      case mX of
-        Nothing -> pure NoClientS
-        Just x -> fmap HasClientS $ case parseEither deserialize x of
-          Left e -> pure (CantDes e)
-          Right y -> do
-            atomically $ writeTVar serverD $ Just y
-            pure $ DesValue $ DeSerialized topic $ serialize y
+                             -> IO (HasClientS (DesValue ServerToClient))
+deserializeValueClientOrigin TestTopicState{deserialize,clientS,serverD,serialize} topic = do
+  mX <- atomically (readTVar clientS)
+  case mX of
+    Nothing -> pure NoClientS
+    Just x -> fmap HasClientS $ case parseEither deserialize x of
+      Left e -> pure (CantDes e)
+      Right y -> do
+        atomically $ writeTVar serverD $ Just y
+        pure $ DesValue $ ServerToClient topic DeSerialized $ serialize y
 
 
-gotClientDeSerialize :: TestSuiteState
-                     -> TestTopic
+gotClientDeSerialize :: TestTopicState
                      -> Value
-                     -> IO (HasTopic (DesValue ()))
-gotClientDeSerialize xsRef topic value = do
-  mState <- getTopicState xsRef topic
-  case mState of
-    NoTopic -> pure NoTopic
-    HasTopic (TestTopicState{deserialize,clientD}) -> fmap HasTopic $ do
-      case parseEither deserialize value of
-        Left e -> pure (CantDes e)
-        Right y -> do
-          atomically $ writeTVar clientD $ Just y
-          pure (DesValue ())
+                     -> IO (DesValue ())
+gotClientDeSerialize TestTopicState{deserialize,clientD} value = do
+  case parseEither deserialize value of
+    Left e -> pure (CantDes e)
+    Right y -> do
+      atomically $ writeTVar clientD $ Just y
+      pure (DesValue ())
 
 
-verify :: TestSuiteState
-       -> TestTopic
+verify :: TestTopicState
        -> IO
-          ( HasTopic
-            ( HasServerG
-              ( HasClientS
-                ( ServerSerializedMatch
-                  ( HasServerD
-                    ( DesValue
-                      ( ServerDeSerializedMatch
-                        ( HasClientG
-                          ( HasServerS
-                            ( ClientSerializedMatch
-                              ( HasClientD
-                                ( DesValue
-                                  ( ClientDeSerializedMatch ())))))))))))))
-verify xsRef topic = do
-  mState <- getTopicState xsRef topic
-  case mState of
-    NoTopic -> pure NoTopic
-    HasTopic TestTopicState{..} -> fmap HasTopic $ do
-      mServerG <- atomically (readTVar serverG)
-      case mServerG of
-        Nothing -> pure NoServerG
-        Just serverG' -> fmap HasServerG $ do
-          mClientS <- atomically (readTVar clientS)
-          case mClientS of
-            Nothing -> pure NoClientS
-            Just clientS' -> fmap HasClientS $ do
-              if serialize serverG' /= clientS'
-                then pure ServerSerializedMismatch
-                else fmap ServerSerializedMatch $ do
-                  mServerD <- atomically (readTVar serverD)
-                  case mServerD of
-                    Nothing -> pure NoServerD
-                    Just serverD' -> fmap HasServerD $ do
-                      case parseEither deserialize clientS' of
-                        Left e -> pure (CantDes e)
-                        Right serverD''
-                          | serverD'' /= serverD' -> pure (DesValue ServerDeSerializedMismatch)
-                          | otherwise -> fmap (DesValue . ServerDeSerializedMatch) $ do
-                              mClientG <- atomically (readTVar clientG)
-                              case mClientG of
-                                Nothing -> pure NoClientG
-                                Just clientG' -> fmap HasClientG $ do
-                                  mServerS <- atomically (readTVar serverS)
-                                  case mServerS of
-                                    Nothing -> pure NoServerS
-                                    Just serverS' -> fmap HasServerS $ do
-                                      if serialize clientG' /= serverS'
-                                        then pure ClientSerializedMismatch
-                                        else fmap ClientSerializedMatch $ do
-                                          mClientD <- atomically (readTVar clientD)
-                                          case mClientD of
-                                            Nothing -> pure NoClientD
-                                            Just clientD' -> fmap HasClientD $ do
-                                              case parseEither deserialize serverS' of
-                                                Left e -> pure (CantDes e)
-                                                Right serverS''
-                                                  | serverS'' /= clientD' -> pure (DesValue ClientDeSerializedMismatch)
-                                                  | otherwise -> do
-                                                      fmap (DesValue . ClientDeSerializedMatch) $ pure ()
+          ( HasServerG
+            ( HasClientS
+              ( ServerSerializedMatch
+                ( HasServerD
+                  ( DesValue
+                    ( ServerDeSerializedMatch
+                      ( HasClientG
+                        ( HasServerS
+                          ( ClientSerializedMatch
+                            ( HasClientD
+                              ( DesValue
+                                ( ClientDeSerializedMatch ()))))))))))))
+verify
+  TestTopicState
+  { serverG
+  , clientS
+  , serverD
+  , clientG
+  , serverS
+  , clientD
+  , deserialize
+  , serialize
+  } = do
+  mServerG <- atomically (readTVar serverG)
+  case mServerG of
+    Nothing -> pure NoServerG
+    Just serverG' -> fmap HasServerG $ do
+      mClientS <- atomically (readTVar clientS)
+      case mClientS of
+        Nothing -> pure NoClientS
+        Just clientS' -> fmap HasClientS $ do
+          if serialize serverG' /= clientS'
+            then pure ServerSerializedMismatch
+            else fmap ServerSerializedMatch $ do
+              mServerD <- atomically (readTVar serverD)
+              case mServerD of
+                Nothing -> pure NoServerD
+                Just serverD' -> fmap HasServerD $ do
+                  case parseEither deserialize clientS' of
+                    Left e -> pure (CantDes e)
+                    Right serverD''
+                      | serverD'' /= serverD' -> pure (DesValue ServerDeSerializedMismatch)
+                      | otherwise -> fmap (DesValue . ServerDeSerializedMatch) $ do
+                          mClientG <- atomically (readTVar clientG)
+                          case mClientG of
+                            Nothing -> pure NoClientG
+                            Just clientG' -> fmap HasClientG $ do
+                              mServerS <- atomically (readTVar serverS)
+                              case mServerS of
+                                Nothing -> pure NoServerS
+                                Just serverS' -> fmap HasServerS $ do
+                                  if serialize clientG' /= serverS'
+                                    then pure ClientSerializedMismatch
+                                    else fmap ClientSerializedMatch $ do
+                                      mClientD <- atomically (readTVar clientD)
+                                      case mClientD of
+                                        Nothing -> pure NoClientD
+                                        Just clientD' -> fmap HasClientD $ do
+                                          case parseEither deserialize serverS' of
+                                            Left e -> pure (CantDes e)
+                                            Right serverS''
+                                              | serverS'' /= clientD' -> pure (DesValue ClientDeSerializedMismatch)
+                                              | otherwise -> do
+                                                  fmap (DesValue . ClientDeSerializedMatch) $ pure ()
 
