@@ -12,7 +12,7 @@ import Data.Time.Calendar (Day)
 
 import Test.Serialization (ServerParams (..), startServer)
 import Test.Serialization.Types
-  (TestSuiteM, registerTopic, ChannelMsg, ClientToServer, ServerToClient)
+  (TestSuiteM, registerTopic, MsgType, ClientToServer, ServerToClient, TestTopic)
 import Test.Tasty (defaultMain, testGroup)
 import qualified Test.Tasty.QuickCheck as QC
 import Test.QuickCheck.Property (succeeded, failed, Result)
@@ -29,11 +29,11 @@ main :: IO ()
 main = do
   putStrLn "Starting tests..."
   -- defaultMain $ testGroup "Self-check"
-  --   [ QC.testProperty "ChannelMsg" $ \x ->
+  --   [ QC.testProperty "MsgType" $ \x ->
   --       let go = unsafePerformIO $ do
   --             print x
   --             pure id
-  --       in  go (jsonIso (x :: ChannelMsg))
+  --       in  go (jsonIso (x :: MsgType))
   --   ]
   startServer
     ServerParams
@@ -44,7 +44,8 @@ main = do
 
 tests :: TestSuiteM ()
 tests = do
-  registerTopic "ChannelMsg" (Proxy :: Proxy ChannelMsg)
+  registerTopic "TestTopic" (Proxy :: Proxy TestTopic)
+  registerTopic "MsgType" (Proxy :: Proxy MsgType)
   registerTopic "ClientToServer" (Proxy :: Proxy ClientToServer)
   registerTopic "ServerToClient" (Proxy :: Proxy ServerToClient)
   registerTopic "JSONUnit" (Proxy :: Proxy JSONUnit)

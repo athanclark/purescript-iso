@@ -225,16 +225,28 @@ dumpTopic serverStateRef addr t = do
       mState <- getTopicState suiteState t
       case mState of
         NoTopic -> error $ "No topic in test suite! " ++ show t
-        HasTopic (TestTopicState {serialize,clientG,serverS,clientD,serverG,clientS,serverD}) -> do
+        HasTopic (TestTopicState {..}) -> do
           mClientG <- atomically (readTVar clientG)
           putStrLn $ "clientG: " ++ show (serialize <$> mClientG)
+          mBS <- atomically (readTVar clientGReceived)
+          putStrLn $ "  - received: " ++ show mBS
           mServerS <- atomically (readTVar serverS)
           putStrLn $ "serverS: " ++ show mServerS
+          mBS <- atomically (readTVar serverSSent)
+          putStrLn $ "  - sent: " ++ show mBS
           mClientD <- atomically (readTVar clientD)
           putStrLn $ "clientD: " ++ show (serialize <$> mClientD)
+          mBS <- atomically (readTVar clientDReceived)
+          putStrLn $ "  - received: " ++ show mBS
           mServerG <- atomically (readTVar serverG)
           putStrLn $ "serverG: " ++ show (serialize <$> mServerG)
+          mBS <- atomically (readTVar serverGSent)
+          putStrLn $ "  - sent: " ++ show mBS
           mClientS <- atomically (readTVar clientS)
           putStrLn $ "clientS: " ++ show mClientS
+          mBS <- atomically (readTVar clientSReceived)
+          putStrLn $ "  - received: " ++ show mBS
           mServerD <- atomically (readTVar serverD)
           putStrLn $ "serverD: " ++ show (serialize <$> mServerD)
+          mBS <- atomically (readTVar serverDSent)
+          putStrLn $ "  - sent: " ++ show mBS
