@@ -35,6 +35,7 @@ resolver: lts-11.2
 #  - wai
 packages:
 - .
+
 # Dependency packages to be pulled from upstream that are not in the resolver
 # using the same syntax as the packages field.
 # (e.g., acme-missiles-0.3)
@@ -43,6 +44,8 @@ extra-deps:
   - attoparsec-ip-0.0.2
   - attoparsec-uri-0.0.5.1
   - zeromq4-simple-0.0.0
+  - quickcheck-combinators-0.0.4
+
 
 # Override default flag values for local packages and extra-deps
 # flags: {}

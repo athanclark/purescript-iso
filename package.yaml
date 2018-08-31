@@ -29,6 +29,7 @@ dependencies:
 - attoparsec-uri >= 0.0.5.1 && < 0.0.6
 - bytestring
 - containers
+- emailaddress >= 0.2.0.0
 - monad-control
 - mtl
 - stm
