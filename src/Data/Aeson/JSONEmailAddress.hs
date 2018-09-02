@@ -8,10 +8,12 @@ module Data.Aeson.JSONEmailAddress where
 import Text.EmailAddress (EmailAddress, emailAddressFromString)
 import Data.Aeson (ToJSON, FromJSON)
 import qualified Data.Char as Char
+import Control.Monad (replicateM)
 import Test.QuickCheck (Arbitrary (..))
-import Test.QuickCheck.Gen (listOf1, elements, scale)
+import Test.QuickCheck.Gen (elements, scale, choose)
 import GHC.Generics (Generic)
 
+-- FIXME restrict to 64 x 63 chars
 
 newtype JSONEmailAddress = JSONEmailAddress
   { getJSONEmailAddress :: EmailAddress
@@ -19,11 +21,13 @@ newtype JSONEmailAddress = JSONEmailAddress
 
 instance Arbitrary JSONEmailAddress where
   arbitrary = do
-    name <- arbitraryNonEmptyAscii -- listOf1 (arbitrary `suchThat` Char.isAlphaNum)
-    domain <- arbitraryNonEmptyAscii -- listOf1 (arbitrary `suchThat` Char.isAlphaNum)
+    name <- arbitraryNonEmptyAscii 64
+    domain <- arbitraryNonEmptyAscii 63
     let x = name ++ "@" ++ domain ++ ".com"
     case emailAddressFromString x of
       Just e -> pure (JSONEmailAddress e)
       Nothing -> error x
     where
-      arbitraryNonEmptyAscii = scale (`div` 2) $ listOf1 (elements ['a' .. 'z'])
+      arbitraryNonEmptyAscii s = do
+        l <- choose (1,s)
+        replicateM l (elements ['a' .. 'z'])

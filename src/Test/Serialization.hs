@@ -49,6 +49,7 @@ import System.Exit (exitSuccess)
 data ServerParams = ServerParams
   { serverParamsControlHost :: URIAuth
   , serverParamsTestSuite :: TestSuiteM ()
+  , serverParamsMaxSize :: Int
   }
 
 
@@ -139,12 +140,12 @@ startServer ServerParams{..} = do
                         mOk <- liftIO $ gotClientDeSerialize state y
                         if isOkay mOk
                           then do
-                            mOutgoing <- liftIO $ generateValue state t
+                            mOutgoing <- liftIO $ generateValue state t serverParamsMaxSize
                             case mOutgoing of
                               GenValue outgoing -> do
                                 o' <- send addr server outgoing
                                 liftIO $ atomically $ writeTVar (serverGSent state) (Just o')
-                              DoneGenerating -> pure ()
+                              DoneGenerating -> error "Server finished before client"
                                 -- FIXME should never occur - client dictates
                                 -- number of quickchecks
                           else fail' serverStateRef server "Bad got deserialize: " addr t mOk
@@ -161,11 +162,30 @@ startServer ServerParams{..} = do
                                 -- verify
                                 mOk' <- liftIO $ verify state
                                 if isOkay mOk'
-                                  then () <$ send addr server (Continue t)
+                                  then do
+                                    liftIO $ clearState state
+                                    () <$ send addr server (Continue t)
                                   else fail' serverStateRef server "Bad verify: " addr t mOk'
                               _ -> fail' serverStateRef server "Bad deserialize value: " addr t mOutgoing
                           else fail' serverStateRef server "Bad got serialize: " addr t mOk
 
+
+
+clearState :: TestTopicState
+           -> IO ()
+clearState TestTopicState{..} = atomically $ do
+  writeTVar clientG Nothing
+  writeTVar clientGReceived Nothing
+  writeTVar clientS Nothing
+  writeTVar clientSReceived Nothing
+  writeTVar clientD Nothing
+  writeTVar clientDReceived Nothing
+  writeTVar serverG Nothing
+  writeTVar serverGSent Nothing
+  writeTVar serverS Nothing
+  writeTVar serverSSent Nothing
+  writeTVar serverD Nothing
+  writeTVar serverDSent Nothing
 
 
 
@@ -226,6 +246,8 @@ dumpTopic serverStateRef addr t = do
       case mState of
         NoTopic -> error $ "No topic in test suite! " ++ show t
         HasTopic (TestTopicState {..}) -> do
+          size' <- atomically $ readTVar size
+          putStrLn $ "size: " ++ show size'
           mClientG <- atomically (readTVar clientG)
           putStrLn $ "clientG: " ++ show (serialize <$> mClientG)
           mBS <- atomically (readTVar clientGReceived)
@@ -233,7 +255,7 @@ dumpTopic serverStateRef addr t = do
           mServerS <- atomically (readTVar serverS)
           putStrLn $ "serverS: " ++ show mServerS
           mBS <- atomically (readTVar serverSSent)
-          putStrLn $ "  - sent: " ++ show mBS
+          putStrLn $ "  - sent:     " ++ show mBS
           mClientD <- atomically (readTVar clientD)
           putStrLn $ "clientD: " ++ show (serialize <$> mClientD)
           mBS <- atomically (readTVar clientDReceived)
@@ -241,7 +263,7 @@ dumpTopic serverStateRef addr t = do
           mServerG <- atomically (readTVar serverG)
           putStrLn $ "serverG: " ++ show (serialize <$> mServerG)
           mBS <- atomically (readTVar serverGSent)
-          putStrLn $ "  - sent: " ++ show mBS
+          putStrLn $ "  - sent:     " ++ show mBS
           mClientS <- atomically (readTVar clientS)
           putStrLn $ "clientS: " ++ show mClientS
           mBS <- atomically (readTVar clientSReceived)
@@ -249,4 +271,4 @@ dumpTopic serverStateRef addr t = do
           mServerD <- atomically (readTVar serverD)
           putStrLn $ "serverD: " ++ show (serialize <$> mServerD)
           mBS <- atomically (readTVar serverDSent)
-          putStrLn $ "  - sent: " ++ show mBS
+          putStrLn $ "  - sent:     " ++ show mBS

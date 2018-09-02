@@ -438,10 +438,11 @@ getTopicState xsRef topic = do
 
 generateValue :: TestTopicState
               -> TestTopic
+              -> Int
               -> IO (GenValue ServerToClient)
-generateValue TestTopicState{size,generate,serialize,serverG} topic = do
+generateValue TestTopicState{size,generate,serialize,serverG} topic maxSize = do
   s <- atomically (readTVar size)
-  if s >= 100
+  if s >= maxSize
     then pure DoneGenerating
     else do
       g <- newQCGen

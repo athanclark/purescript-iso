@@ -25,13 +25,16 @@ ghc-options:
 dependencies:
 - base >= 4.7 && < 5
 - aeson
+- aeson-attoparsec
 - async
+- attoparsec
 - attoparsec-uri >= 0.0.5.1 && < 0.0.6
 - bytestring
 - containers
 - emailaddress >= 0.2.0.0
 - monad-control
 - mtl
+- scientific
 - stm
 - strict
 - text

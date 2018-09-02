@@ -8,6 +8,8 @@ import Data.Aeson.JSONTuple (JSONTuple)
 import Data.Aeson.JSONDateTime (JSONDateTime)
 import Data.Aeson.JSONString (JSONString)
 import Data.Aeson.JSONEmailAddress (JSONEmailAddress)
+import Data.Aeson.JSONInt (JSONInt)
+import Data.Aeson.JSONInteger (JSONInteger)
 import Data.Time (UTCTime)
 import Data.Time.Calendar (Day)
 
@@ -40,6 +42,7 @@ main = do
     ServerParams
     { serverParamsControlHost = URIAuth Strict.Nothing Glob (Strict.Just 5561)
     , serverParamsTestSuite = tests
+    , serverParamsMaxSize = 200
     }
 
 
@@ -56,6 +59,8 @@ tests = do
   registerTopic "JSONDateTime" (Proxy :: Proxy JSONDateTime)
   registerTopic "JSONString" (Proxy :: Proxy JSONString)
   registerTopic "JSONEmailAddress" (Proxy :: Proxy JSONEmailAddress)
+  registerTopic "JSONInt" (Proxy :: Proxy JSONInt)
+  registerTopic "JSONInteger" (Proxy :: Proxy JSONInteger)
 
 
 jsonIso :: ToJSON a => FromJSON a => Eq a => a -> Result
