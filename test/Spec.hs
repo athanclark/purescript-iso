@@ -10,6 +10,7 @@ import Data.Aeson.JSONString (JSONString)
 import Data.Aeson.JSONEmailAddress (JSONEmailAddress)
 import Data.Aeson.JSONInt (JSONInt)
 import Data.Aeson.JSONInteger (JSONInteger)
+import Data.Aeson.JSONScientific (JSONScientific)
 import Data.Time (UTCTime)
 import Data.Time.Calendar (Day)
 
@@ -61,6 +62,7 @@ tests = do
   registerTopic "JSONEmailAddress" (Proxy :: Proxy JSONEmailAddress)
   registerTopic "JSONInt" (Proxy :: Proxy JSONInt)
   registerTopic "JSONInteger" (Proxy :: Proxy JSONInteger)
+  registerTopic "JSONScientific" (Proxy :: Proxy JSONScientific)
 
 
 jsonIso :: ToJSON a => FromJSON a => Eq a => a -> Result
