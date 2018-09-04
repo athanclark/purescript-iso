@@ -19,7 +19,7 @@ import System.IO.Unsafe (unsafePerformIO)
 
 
 newtype JSONInteger = JSONInteger
-  { getJSONInt :: Scientific
+  { getJSONInteger :: Scientific
   } deriving (Eq, Ord{-, Enum-}, Show, Read, Generic, Num, Real{-, Integral-})
 
 instance ToJSON JSONInteger where
