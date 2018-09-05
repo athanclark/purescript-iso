@@ -3,13 +3,13 @@
   , GeneralizedNewtypeDeriving
   #-}
 
-module Data.Aeson.JSONInteger where
+module Data.Aeson.JSONInteger (JSONInteger, jsonInteger, getJSONInteger) where
 
 import Data.Aeson (ToJSON (..), FromJSON (..), Value (String))
 import Data.Aeson.Types (typeMismatch)
 import Data.Aeson.Attoparsec (attoAeson)
 import Data.Attoparsec.Text (decimal, signed)
-import Data.Scientific (Scientific, coefficient, base10Exponent)
+import Data.Scientific (Scientific, coefficient, base10Exponent, scientific)
 import qualified Data.Text as T
 import Text.Read (readMaybe)
 import GHC.Generics (Generic)
@@ -18,9 +18,24 @@ import Test.QuickCheck.Gen (scale, elements, listOf1)
 import System.IO.Unsafe (unsafePerformIO)
 
 
-newtype JSONInteger = JSONInteger
-  { getJSONInteger :: Scientific
-  } deriving (Eq, Ord{-, Enum-}, Show, Read, Generic, Num, Real{-, Integral-})
+newtype JSONInteger = JSONInteger Scientific
+  deriving (Eq, Ord, Show, Read, Generic, Num, Real)
+
+instance Enum JSONInteger where
+  toEnum = jsonInteger . fromIntegral
+  fromEnum = fromIntegral . getJSONInteger
+
+instance Integral JSONInteger where
+  toInteger = getJSONInteger
+  quotRem x y =
+    let (a,b) = quotRem (toInteger x) (toInteger y)
+    in  (jsonInteger a, jsonInteger b)
+
+jsonInteger :: Integer -> JSONInteger
+jsonInteger i = JSONInteger (scientific i 0)
+
+getJSONInteger :: JSONInteger -> Integer
+getJSONInteger (JSONInteger x) = coefficient x * (10 ^ base10Exponent x)
 
 instance ToJSON JSONInteger where
   toJSON (JSONInteger x) = toJSON $
