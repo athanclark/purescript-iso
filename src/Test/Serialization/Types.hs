@@ -8,6 +8,7 @@
   , RecordWildCards
   , ExistentialQuantification
   , GeneralizedNewtypeDeriving
+  , PartialTypeSignatures
   #-}
 
 module Test.Serialization.Types where
@@ -15,12 +16,13 @@ module Test.Serialization.Types where
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.ByteString (ByteString)
+import qualified Data.ByteString.Lazy as LBS
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Aeson
-  (FromJSON (..), ToJSON (..), object, (.:), (.=), Value (..))
+  (FromJSON (..), ToJSON (..), object, (.:), (.=), Value (..), encode, decode)
 import Data.Aeson.Types (typeMismatch, Parser, parseEither)
 import Data.Proxy (Proxy (..))
 import Data.String (IsString)
@@ -385,44 +387,64 @@ instance IsOkay a => IsOkay (HasClientS a) where
 data ServerSerializedMatch a
   = ServerSerializedMatch a
   | ServerSerializedMismatch
+    { serverSerializedServerG :: Value
+    , serverSerializedClientS :: Value
+    , serverSerializedServerGSent :: LBS.ByteString
+    , serverSerializedClientSReceived :: LBS.ByteString
+    }
   deriving (Eq, Show, Generic)
 
 instance IsOkay a => IsOkay (ServerSerializedMatch a) where
   isOkay x = case x of
-    ServerSerializedMismatch -> False
+    ServerSerializedMismatch _ _ _ _ -> False
     ServerSerializedMatch y -> isOkay y
 
 
 data ServerDeSerializedMatch a
   = ServerDeSerializedMatch a
   | ServerDeSerializedMismatch
+    { serverDeSerializedClientS :: Value
+    , serverDeSerializedServerD :: Value
+    , serverDeSerializedClientSReceived :: LBS.ByteString
+    , serverDeSerializedServerDSent :: LBS.ByteString
+    }
   deriving (Eq, Show, Generic)
 
 instance IsOkay a => IsOkay (ServerDeSerializedMatch a) where
   isOkay x = case x of
-    ServerDeSerializedMismatch -> False
+    ServerDeSerializedMismatch _ _ _ _ -> False
     ServerDeSerializedMatch y -> isOkay y
 
 
 data ClientSerializedMatch a
   = ClientSerializedMatch a
   | ClientSerializedMismatch
+    { clientSerializedClientG :: Value
+    , clientSerializedServerS :: Value
+    , clientSerializedClientGReceived :: LBS.ByteString
+    , clientSerializedServerSSent :: LBS.ByteString
+    }
   deriving (Eq, Show, Generic)
 
 instance IsOkay a => IsOkay (ClientSerializedMatch a) where
   isOkay x = case x of
-    ClientSerializedMismatch -> False
+    ClientSerializedMismatch _ _ _ _ -> False
     ClientSerializedMatch y -> isOkay y
 
 
 data ClientDeSerializedMatch a
   = ClientDeSerializedMatch a
   | ClientDeSerializedMismatch
+    { clientDeSerializedServerS :: Value
+    , clientDeSerializedClientD :: Value
+    , clientDeSerializedServerSSent :: LBS.ByteString
+    , clientDeSerializedClientDReceived :: LBS.ByteString
+    }
   deriving (Eq, Show, Generic)
 
 instance IsOkay a => IsOkay (ClientDeSerializedMatch a) where
   isOkay x = case x of
-    ClientDeSerializedMismatch -> False
+    ClientDeSerializedMismatch _ _ _ _ -> False
     ClientDeSerializedMatch y -> isOkay y
 
 
@@ -534,45 +556,55 @@ verify
   , deserialize
   , serialize
   } = do
-  mServerG <- atomically (readTVar serverG)
-  case mServerG of
-    Nothing -> pure NoServerG
-    Just serverG' -> fmap HasServerG $ do
-      mClientS <- atomically (readTVar clientS)
-      case mClientS of
-        Nothing -> pure NoClientS
-        Just clientS' -> fmap HasClientS $ do
-          if serialize serverG' /= clientS'
-            then pure ServerSerializedMismatch
-            else fmap ServerSerializedMatch $ do
-              mServerD <- atomically (readTVar serverD)
-              case mServerD of
-                Nothing -> pure NoServerD
-                Just serverD' -> fmap HasServerD $ do
-                  case parseEither deserialize clientS' of
-                    Left e -> pure (CantDes e)
-                    Right serverD''
-                      | serverD'' /= serverD' -> pure (DesValue ServerDeSerializedMismatch)
-                      | otherwise -> fmap (DesValue . ServerDeSerializedMatch) $ do
-                          mClientG <- atomically (readTVar clientG)
-                          case mClientG of
-                            Nothing -> pure NoClientG
-                            Just clientG' -> fmap HasClientG $ do
-                              mServerS <- atomically (readTVar serverS)
-                              case mServerS of
-                                Nothing -> pure NoServerS
-                                Just serverS' -> fmap HasServerS $ do
-                                  if serialize clientG' /= serverS'
-                                    then pure ClientSerializedMismatch
-                                    else fmap ClientSerializedMatch $ do
-                                      mClientD <- atomically (readTVar clientD)
-                                      case mClientD of
-                                        Nothing -> pure NoClientD
-                                        Just clientD' -> fmap HasClientD $ do
-                                          case parseEither deserialize serverS' of
-                                            Left e -> pure (CantDes e)
-                                            Right serverS''
-                                              | serverS'' /= clientD' -> pure (DesValue ClientDeSerializedMismatch)
-                                              | otherwise -> do
-                                                  fmap (DesValue . ClientDeSerializedMatch) $ pure ()
+  let serverSMatch :: (Value -> IO _) -> IO (HasServerG (HasClientS (ServerSerializedMatch _)))
+      serverSMatch x = do
+        mServerG <- atomically (readTVar serverG)
+        case mServerG of
+          Nothing -> pure NoServerG
+          Just serverG' -> fmap HasServerG $ do
+            mClientS <- atomically (readTVar clientS)
+            case mClientS of
+              Nothing -> pure NoClientS
+              Just clientS' -> fmap HasClientS $ do
+                let serverG'' = serialize serverG'
+                if serverG'' /= clientS'
+                  then pure $ ServerSerializedMismatch serverG'' clientS' (encode serverG'') (encode clientS')
+                  else ServerSerializedMatch <$> x clientS'
+      serverDMatch :: IO _ -> Value -> IO (HasServerD (DesValue (ServerDeSerializedMatch _)))
+      serverDMatch x clientS' = do
+        mServerD <- atomically (readTVar serverD)
+        case mServerD of
+          Nothing -> pure NoServerD
+          Just serverD' -> fmap HasServerD $
+            case parseEither deserialize clientS' of
+              Left e -> pure (CantDes e)
+              Right clientS''
+                | clientS'' /= serverD' -> pure $ DesValue $ ServerDeSerializedMismatch clientS' (toJSON serverD') (encode clientS') (encode serverD')
+                | otherwise -> (DesValue . ServerDeSerializedMatch) <$> x
+      clientSMatch :: (Value -> IO _) -> IO (HasClientG (HasServerS (ClientSerializedMatch _)))
+      clientSMatch x = do
+        mClientG <- atomically (readTVar clientG)
+        case mClientG of
+          Nothing -> pure NoClientG
+          Just clientG' -> fmap HasClientG $ do
+            mServerS <- atomically (readTVar serverS)
+            case mServerS of
+              Nothing -> pure NoServerS
+              Just serverS' -> fmap HasServerS $ do
+                let clientG'' = serialize clientG'
+                if clientG'' /= serverS'
+                  then pure $ ClientSerializedMismatch clientG'' serverS' (encode clientG'') (encode serverS')
+                  else ClientSerializedMatch <$> x serverS'
+      clientDMatch :: Value -> IO (HasClientD (DesValue (ClientDeSerializedMatch ())))
+      clientDMatch serverS' = do
+        mClientD <- atomically (readTVar clientD)
+        case mClientD of
+          Nothing -> pure NoClientD
+          Just clientD' -> fmap HasClientD $
+            case parseEither deserialize serverS' of
+              Left e -> pure (CantDes e)
+              Right serverS''
+                | serverS'' /= clientD' -> pure $ DesValue $ ClientDeSerializedMismatch serverS' (toJSON clientD') (encode serverS') (encode clientD')
+                | otherwise -> pure $ DesValue $ ClientDeSerializedMatch ()
+  serverSMatch $ serverDMatch $ clientSMatch clientDMatch
 
