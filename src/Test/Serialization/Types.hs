@@ -24,6 +24,7 @@ import qualified Data.Map.Strict as Map
 import Data.Aeson
   (FromJSON (..), ToJSON (..), object, (.:), (.=), Value (..), encode, decode)
 import Data.Aeson.Types (typeMismatch, Parser, parseEither)
+import Data.Aeson.Diff (diff)
 import Data.Proxy (Proxy (..))
 import Data.String (IsString)
 import Control.Applicative ((<|>))
@@ -568,7 +569,9 @@ verify
               Just clientS' -> fmap HasClientS $ do
                 let serverG'' = serialize serverG'
                 if serverG'' /= clientS'
-                  then pure $ ServerSerializedMismatch serverG'' clientS' (encode serverG'') (encode clientS')
+                  then do
+                    putStrLn $ "Diff: " ++ show (diff serverG'' clientS')
+                    pure $ ServerSerializedMismatch serverG'' clientS' (encode serverG'') (encode clientS')
                   else ServerSerializedMatch <$> x clientS'
       serverDMatch :: IO _ -> Value -> IO (HasServerD (DesValue (ServerDeSerializedMatch _)))
       serverDMatch x clientS' = do
@@ -593,7 +596,9 @@ verify
               Just serverS' -> fmap HasServerS $ do
                 let clientG'' = serialize clientG'
                 if clientG'' /= serverS'
-                  then pure $ ClientSerializedMismatch clientG'' serverS' (encode clientG'') (encode serverS')
+                  then do
+                    putStrLn $ "Diff: " ++ show (diff clientG'' serverS')
+                    pure $ ClientSerializedMismatch clientG'' serverS' (encode clientG'') (encode serverS')
                   else ClientSerializedMatch <$> x serverS'
       clientDMatch :: Value -> IO (HasClientD (DesValue (ClientDeSerializedMatch ())))
       clientDMatch serverS' = do

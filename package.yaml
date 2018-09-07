@@ -1,5 +1,5 @@
 name:                purescript-iso
-version:             0.0.1.8
+version:             0.0.1.9
 git:                 "git://git.localcooking.com/tooling/purescript-iso.git"
 license:             BSD3
 author:              "Athan Clark"
@@ -25,6 +25,7 @@ ghc-options:
 dependencies:
 - base >= 4.7 && < 5
 - aeson
+- aeson-diff
 - aeson-attoparsec
 - async
 - attoparsec
