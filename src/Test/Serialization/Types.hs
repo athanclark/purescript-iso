@@ -570,7 +570,8 @@ verify
                 let serverG'' = serialize serverG'
                 if serverG'' /= clientS'
                   then do
-                    putStrLn $ "Diff: " ++ show (diff serverG'' clientS')
+                    putStrLn $ "Diff: serverG-clientS: " ++ show (diff serverG'' clientS')
+                    putStrLn $ "      clientS-serverG: " ++ show (diff clientS' serverG'')
                     pure $ ServerSerializedMismatch serverG'' clientS' (encode serverG'') (encode clientS')
                   else ServerSerializedMatch <$> x clientS'
       serverDMatch :: IO _ -> Value -> IO (HasServerD (DesValue (ServerDeSerializedMatch _)))
@@ -597,7 +598,8 @@ verify
                 let clientG'' = serialize clientG'
                 if clientG'' /= serverS'
                   then do
-                    putStrLn $ "Diff: " ++ show (diff clientG'' serverS')
+                    putStrLn $ "Diff: clientG-serverS: " ++ show (diff clientG'' serverS')
+                    putStrLn $ "      serverS-clientG: " ++ show (diff serverS' clientG'')
                     pure $ ClientSerializedMismatch clientG'' serverS' (encode clientG'') (encode serverS')
                   else ClientSerializedMatch <$> x serverS'
       clientDMatch :: Value -> IO (HasClientD (DesValue (ClientDeSerializedMatch ())))
