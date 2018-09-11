@@ -1,18 +1,20 @@
 {-# LANGUAGE
     OverloadedStrings
   , DeriveGeneric
+  , DeriveAnyClass
   #-}
 
 module Data.Aeson.JSONTuple where
 
 import Data.Aeson (ToJSON (..), FromJSON (..), Value (Object), object, (.=), (.:))
 import Data.Aeson.Types (typeMismatch)
+import Control.DeepSeq (NFData)
 import Test.QuickCheck (Arbitrary (..))
 import GHC.Generics (Generic)
 
 
 data JSONTuple a b = JSONTuple a b
-  deriving (Eq, Ord, Show, Generic)
+  deriving (Eq, Ord, Show, Generic, NFData)
 
 instance (ToJSON a, ToJSON b) => ToJSON (JSONTuple a b) where
   toJSON (JSONTuple a b) = object ["l" .= a, "r" .= b]

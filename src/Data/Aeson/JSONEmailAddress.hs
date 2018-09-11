@@ -7,10 +7,10 @@ module Data.Aeson.JSONEmailAddress where
 
 import Text.EmailAddress (EmailAddress, emailAddressFromString)
 import Data.Aeson (ToJSON, FromJSON)
-import qualified Data.Char as Char
 import Control.Monad (replicateM)
+import Control.DeepSeq (NFData (..))
 import Test.QuickCheck (Arbitrary (..))
-import Test.QuickCheck.Gen (elements, scale, choose)
+import Test.QuickCheck.Gen (elements, choose)
 import GHC.Generics (Generic)
 
 -- FIXME restrict to 64 x 63 chars
@@ -18,6 +18,9 @@ import GHC.Generics (Generic)
 newtype JSONEmailAddress = JSONEmailAddress
   { getJSONEmailAddress :: EmailAddress
   } deriving (Eq, Ord, Show, Generic, FromJSON, ToJSON)
+
+instance NFData JSONEmailAddress where
+  rnf (JSONEmailAddress x) = seq x ()
 
 instance Arbitrary JSONEmailAddress where
   arbitrary = do

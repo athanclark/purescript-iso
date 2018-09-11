@@ -1,5 +1,5 @@
 name:                purescript-iso
-version:             0.0.2.1
+version:             0.0.3
 git:                 "git://git.localcooking.com/tooling/purescript-iso.git"
 license:             BSD3
 author:              "Athan Clark"
@@ -32,6 +32,7 @@ dependencies:
 - attoparsec-uri >= 0.0.5.1 && < 0.0.6
 - bytestring
 - containers
+- deepseq
 - emailaddress >= 0.2.0.0
 - monad-control
 - mtl

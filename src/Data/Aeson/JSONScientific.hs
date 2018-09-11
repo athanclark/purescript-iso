@@ -7,20 +7,18 @@ module Data.Aeson.JSONScientific where
 
 import Data.Aeson (ToJSON (..), FromJSON (..), Value (String))
 import Data.Aeson.Types (typeMismatch)
-import Data.Aeson.Attoparsec (attoAeson)
-import Data.Attoparsec.Text (decimal, signed)
 import Data.Scientific (Scientific, coefficient, base10Exponent)
 import qualified Data.Text as T
 import Text.Read (readMaybe)
+import Control.DeepSeq (NFData)
 import GHC.Generics (Generic)
 import Test.QuickCheck (Arbitrary (..))
-import Test.QuickCheck.Gen (scale, elements, listOf1, listOf)
-import System.IO.Unsafe (unsafePerformIO)
+import Test.QuickCheck.Gen (elements, listOf1, listOf)
 
 
 newtype JSONScientific = JSONScientific
   { getJSONScientific :: Scientific
-  } deriving (Eq, Ord{-, Enum-}, Show, Read, Generic, Num, Real{-, Integral-})
+  } deriving (Eq, Ord, Show, Read, Generic, Num, Real, NFData, Fractional)
 
 instance ToJSON JSONScientific where
   toJSON (JSONScientific x) = toJSON $
@@ -61,6 +59,3 @@ instance Arbitrary JSONScientific where
         p <- listOf (elements ['0'..'9'])
         case readMaybe (s ++ (if length p == 0 then "" else "." ++ p)) of
           Just x -> pure x
-      go x = unsafePerformIO $ do
-        print x
-        pure x

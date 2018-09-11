@@ -7,19 +7,17 @@ module Data.Aeson.JSONInteger (JSONInteger, jsonInteger, getJSONInteger) where
 
 import Data.Aeson (ToJSON (..), FromJSON (..), Value (String))
 import Data.Aeson.Types (typeMismatch)
-import Data.Aeson.Attoparsec (attoAeson)
-import Data.Attoparsec.Text (decimal, signed)
 import Data.Scientific (Scientific, coefficient, base10Exponent, scientific)
 import qualified Data.Text as T
 import Text.Read (readMaybe)
+import Control.DeepSeq (NFData)
 import GHC.Generics (Generic)
 import Test.QuickCheck (Arbitrary (..))
-import Test.QuickCheck.Gen (scale, elements, listOf1)
-import System.IO.Unsafe (unsafePerformIO)
+import Test.QuickCheck.Gen (elements, listOf1)
 
 
 newtype JSONInteger = JSONInteger Scientific
-  deriving (Eq, Ord, Show, Read, Generic, Num, Real)
+  deriving (Eq, Ord, Show, Read, Generic, Num, Real, NFData)
 
 instance Enum JSONInteger where
   toEnum = jsonInteger . fromIntegral
@@ -75,6 +73,3 @@ instance Arbitrary JSONInteger where
         s <- listOf1 (elements ['0'..'9'])
         case readMaybe s of
           Just x -> pure x
-      go x = unsafePerformIO $ do
-        print x
-        pure x

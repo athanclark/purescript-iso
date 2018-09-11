@@ -1,12 +1,14 @@
 {-# LANGUAGE
     OverloadedStrings
   , DeriveGeneric
+  , DeriveAnyClass
   #-}
 
 module Data.Aeson.JSONEither where
 
 import Data.Aeson (ToJSON (..), FromJSON (..), Value (Object), object, (.=), (.:))
 import Data.Aeson.Types (typeMismatch)
+import Control.DeepSeq (NFData)
 import Control.Applicative ((<|>))
 import Test.QuickCheck (Arbitrary (..))
 import Test.QuickCheck.Gen (oneof)
@@ -16,7 +18,7 @@ import GHC.Generics (Generic)
 data JSONEither a b
   = JSONLeft a
   | JSONRight b
-  deriving (Eq, Ord, Show, Generic)
+  deriving (Eq, Ord, Show, Generic, NFData)
 
 instance (ToJSON a, ToJSON b) => ToJSON (JSONEither a b) where
   toJSON x = case x of

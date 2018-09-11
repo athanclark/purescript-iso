@@ -7,9 +7,10 @@ module Data.Aeson.JSONDateTime where
 
 import Data.Time
   ( UTCTime, formatTime, iso8601DateFormat, defaultTimeLocale
-  , getCurrentTime, parseTimeOrError)
+  , getCurrentTime)
 import Data.Aeson (ToJSON, FromJSON, decode)
 import qualified Data.ByteString.Lazy.UTF8 as LBS8
+import Control.DeepSeq (NFData)
 import Test.QuickCheck (Arbitrary (..))
 import GHC.Generics (Generic)
 import System.IO.Unsafe (unsafePerformIO)
@@ -17,7 +18,7 @@ import System.IO.Unsafe (unsafePerformIO)
 
 newtype JSONDateTime = JSONDateTime
   { getJSONDateTime :: UTCTime
-  } deriving (Eq, Ord, Show, Generic, ToJSON, FromJSON)
+  } deriving (Eq, Ord, Show, Generic, ToJSON, FromJSON, NFData)
 
 
 jsonDateTime :: UTCTime -> JSONDateTime
