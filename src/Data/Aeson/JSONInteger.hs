@@ -38,24 +38,27 @@ getJSONInteger (JSONInteger x) = coefficient x * (10 ^ base10Exponent x)
 instance ToJSON JSONInteger where
   toJSON (JSONInteger x) = toJSON $
     let c = coefficient x
-        e = let g | c > 0 = length (show c) - 1
-                  | c == 0 = 0
+        e | c == 0 = 0
+          | otherwise =
+            let g | c > 0 = length (show c) - 1
                   | otherwise = length (show c) - 2
             in  base10Exponent x + g
-        q | c > 0 = dropZeros (show c)
+        cShownReducedExp
           | c == 0 = "0"
-          | otherwise = "-" ++ dropZeros (drop 1 $ show c)
+          | otherwise = dropZerosFromRight (show c)
         c' | c > 0 =
-             if read q < 10
-             then q
-             else take 1 q ++ "." ++ drop 1 q
-           | c == 0 = show c
-           | otherwise = dropZeros $
-             if read q > -10
-             then q
-             else take 2 q ++ "." ++ drop 2 q
-        dropZeros = reverse . dropWhile (== '0') . reverse
+             if read cShownReducedExp < (10 :: Integer)
+             then cShownReducedExp
+             else take 1 cShownReducedExp ++ "." ++ drop 1 cShownReducedExp
+           | c == 0 = "0"
+           | otherwise = dropZerosFromRight $
+             if read cShownReducedExp > (-10 :: Integer)
+             then cShownReducedExp
+             else take 2 cShownReducedExp ++ "." ++ drop 2 cShownReducedExp
     in  c' ++ "e" ++ (if e >= 0 then "+" else "") ++ show e
+    where
+      dropZerosFromRight :: String -> String
+      dropZerosFromRight = reverse . dropWhile (== '0') . reverse
 
 instance FromJSON JSONInteger where
   parseJSON json = case json of
@@ -73,3 +76,4 @@ instance Arbitrary JSONInteger where
         s <- listOf1 (elements ['0'..'9'])
         case readMaybe s of
           Just x -> pure x
+          Nothing -> error $ "Can't parse JSONInteger: " ++ s

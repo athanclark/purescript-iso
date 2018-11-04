@@ -22,7 +22,7 @@ import qualified Data.Set as Set
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Aeson
-  (FromJSON (..), ToJSON (..), object, (.:), (.=), Value (..), encode, decode)
+  (FromJSON (..), ToJSON (..), object, (.:), (.=), Value (..), encode)
 import Data.Aeson.Types (typeMismatch, Parser, parseEither)
 import Data.Aeson.Diff (diff)
 import Data.Proxy (Proxy (..))
@@ -557,7 +557,7 @@ verify
   , deserialize
   , serialize
   } = do
-  let serverSMatch :: (Value -> IO _) -> IO (HasServerG (HasClientS (ServerSerializedMatch _)))
+  let serverSMatch :: (Value -> IO a) -> IO (HasServerG (HasClientS (ServerSerializedMatch a)))
       serverSMatch x = do
         mServerG <- atomically (readTVar serverG)
         case mServerG of
@@ -574,7 +574,7 @@ verify
                     putStrLn $ "      clientS-serverG: " ++ show (diff clientS' serverG'')
                     pure $ ServerSerializedMismatch serverG'' clientS' (encode serverG'') (encode clientS')
                   else ServerSerializedMatch <$> x clientS'
-      serverDMatch :: IO _ -> Value -> IO (HasServerD (DesValue (ServerDeSerializedMatch _)))
+      serverDMatch :: IO a -> Value -> IO (HasServerD (DesValue (ServerDeSerializedMatch a)))
       serverDMatch x clientS' = do
         mServerD <- atomically (readTVar serverD)
         case mServerD of
@@ -585,7 +585,7 @@ verify
               Right clientS''
                 | clientS'' /= serverD' -> pure $ DesValue $ ServerDeSerializedMismatch clientS' (toJSON serverD') (encode clientS') (encode serverD')
                 | otherwise -> (DesValue . ServerDeSerializedMatch) <$> x
-      clientSMatch :: (Value -> IO _) -> IO (HasClientG (HasServerS (ClientSerializedMatch _)))
+      clientSMatch :: (Value -> IO a) -> IO (HasClientG (HasServerS (ClientSerializedMatch a)))
       clientSMatch x = do
         mClientG <- atomically (readTVar clientG)
         case mClientG of

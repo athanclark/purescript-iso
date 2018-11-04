@@ -20,7 +20,6 @@ import Test.Serialization.Types
 
 import Data.URI (URI (..), printURI)
 import Data.URI.Auth (URIAuth)
-import Data.UUID (UUID)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import Data.ByteString (ByteString)
@@ -33,11 +32,9 @@ import qualified Data.Set as Set
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Aeson (eitherDecode, encode, toJSON)
-import Control.Monad (forever, void, when)
+import Control.Monad (forever, when)
 import Control.Monad.Reader (runReaderT)
 import Control.Monad.IO.Class (liftIO)
-import Control.Monad.Trans.Control (liftBaseWith)
-import Control.Concurrent.Async (async, link, cancel)
 import Control.Concurrent.STM
   (STM, TVar, newTVar, atomically, modifyTVar, readTVar, writeTVar)
 import System.ZMQ4.Monadic
@@ -77,7 +74,6 @@ startServer ServerParams{..} = do
       runReaderT serverParamsTestSuite suiteState
       ts <- Map.keysSet <$> atomically (readTVar suiteState)
       when (ts == Set.empty) exitSuccess
-    
 
     forever $ do
       mIncoming <- Z.receive server
@@ -213,7 +209,7 @@ registerClient tests serverState clientKey = do
 
 fail' :: Show a
       => ServerState
-      -> Z.Socket z Router Dealer Z.Bound
+      -> Z.Socket z Router Dealer 'Z.Bound
       -> String
       -> Z.ZMQIdent
       -> TestTopic
@@ -225,7 +221,7 @@ fail' serverStateRef server prefix addr t v = do
   error $ prefix ++ show t ++ ", " ++ show v
 
 
-send :: Z.ZMQIdent -> Z.Socket z Router Dealer Z.Bound -> ServerToClient -> ZMQ z ByteString
+send :: Z.ZMQIdent -> Z.Socket z Router Dealer 'Z.Bound -> ServerToClient -> ZMQ z ByteString
 send addr server x = do
   let x' = LBS.toStrict (encode x)
   Z.send addr server (x' :| [])
@@ -250,25 +246,25 @@ dumpTopic serverStateRef addr t = do
           putStrLn $ "size: " ++ show size'
           mClientG <- atomically (readTVar clientG)
           putStrLn $ "clientG: " ++ show (serialize <$> mClientG)
-          mBS <- atomically (readTVar clientGReceived)
-          putStrLn $ "  - received: " ++ show mBS
+          mCGR <- atomically (readTVar clientGReceived)
+          putStrLn $ "  - received: " ++ show mCGR
           mServerS <- atomically (readTVar serverS)
           putStrLn $ "serverS: " ++ show mServerS
-          mBS <- atomically (readTVar serverSSent)
-          putStrLn $ "  - sent:     " ++ show mBS
+          mSSS <- atomically (readTVar serverSSent)
+          putStrLn $ "  - sent:     " ++ show mSSS
           mClientD <- atomically (readTVar clientD)
           putStrLn $ "clientD: " ++ show (serialize <$> mClientD)
-          mBS <- atomically (readTVar clientDReceived)
-          putStrLn $ "  - received: " ++ show mBS
+          mCDR <- atomically (readTVar clientDReceived)
+          putStrLn $ "  - received: " ++ show mCDR
           mServerG <- atomically (readTVar serverG)
           putStrLn $ "serverG: " ++ show (serialize <$> mServerG)
-          mBS <- atomically (readTVar serverGSent)
-          putStrLn $ "  - sent:     " ++ show mBS
+          mSGS <- atomically (readTVar serverGSent)
+          putStrLn $ "  - sent:     " ++ show mSGS
           mClientS <- atomically (readTVar clientS)
           putStrLn $ "clientS: " ++ show mClientS
-          mBS <- atomically (readTVar clientSReceived)
-          putStrLn $ "  - received: " ++ show mBS
+          mCSR <- atomically (readTVar clientSReceived)
+          putStrLn $ "  - received: " ++ show mCSR
           mServerD <- atomically (readTVar serverD)
           putStrLn $ "serverD: " ++ show (serialize <$> mServerD)
-          mBS <- atomically (readTVar serverDSent)
-          putStrLn $ "  - sent:     " ++ show mBS
+          mSDS <- atomically (readTVar serverDSent)
+          putStrLn $ "  - sent:     " ++ show mSDS

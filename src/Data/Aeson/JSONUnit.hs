@@ -31,12 +31,3 @@ instance FromJSON JSONUnit where
     where
       fail' = typeMismatch "JSONUnit" json
 
-
-boolToUnit :: Bool -> Maybe JSONUnit
-boolToUnit ok
-  | ok = Just JSONUnit
-  | otherwise = Nothing
-
-
-unitToUnit :: () -> Maybe JSONUnit
-unitToUnit () = Just JSONUnit

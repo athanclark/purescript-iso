@@ -36,12 +36,12 @@ instance ToJSON JSONScientific where
           | otherwise = dropZerosFromRight (show c)
         c' :: String -- reduced coefficient
         c' | c > 0 =
-             if read cShownReducedExp < 10
+             if read cShownReducedExp < (10 :: Integer)
              then cShownReducedExp
              else take 1 cShownReducedExp ++ "." ++ drop 1 cShownReducedExp
            | c == 0 = "0"
            | otherwise = dropZerosFromRight $
-             if read cShownReducedExp > -10
+             if read cShownReducedExp > (-10 :: Integer)
              then cShownReducedExp
              else take 2 cShownReducedExp ++ "." ++ drop 2 cShownReducedExp
     in  c' ++ "e" ++ (if e >= 0 then "+" else "") ++ show e
@@ -64,5 +64,7 @@ instance Arbitrary JSONScientific where
       arbitraryFloat = do
         s <- listOf1 (elements ['0'..'9'])
         p <- listOf (elements ['0'..'9'])
-        case readMaybe (s ++ (if null p then "" else "." ++ p)) of
+        let s' = s ++ (if null p then "" else "." ++ p)
+        case readMaybe s' of
           Just x -> pure x
+          Nothing -> error $ "Can't parse int: " ++ s'

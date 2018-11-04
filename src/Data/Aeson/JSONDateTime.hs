@@ -3,7 +3,7 @@
   , DeriveGeneric
   #-}
 
-module Data.Aeson.JSONDateTime where
+module Data.Aeson.JSONDateTime (JSONDateTime, getJSONDateTime, jsonDateTime) where
 
 import Data.Time
   ( UTCTime, formatTime, iso8601DateFormat, defaultTimeLocale
@@ -28,7 +28,7 @@ jsonDateTime now =
       s' = s ++ "." ++ p ++ "Z"
   in  case decode $ LBS8.fromString $ show s' of
         Just x -> JSONDateTime x
-        Nothing -> error s'
+        Nothing -> error $ "DateTime parsing failed: " ++ s'
 
 
 instance Arbitrary JSONDateTime where
