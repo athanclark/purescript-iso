@@ -42,8 +42,8 @@ packages:
 extra-deps:
   - ip-1.4.1
   - aeson-attoparsec-0.0.0
-  - attoparsec-ip-0.0.4
-  - attoparsec-uri-0.0.6
+  - attoparsec-ip-0.0.5
+  - attoparsec-uri-0.0.7
   - zeromq4-simple-0.0.0
   - quickcheck-combinators-0.0.5
   - emailaddress-0.2.0.0

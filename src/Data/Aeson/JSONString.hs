@@ -15,5 +15,6 @@ import Test.QuickCheck (Arbitrary)
 import Test.QuickCheck.Instances ()
 
 
-newtype JSONString = JSONString Text
-  deriving (Eq, Ord, Generic, ToJSON, FromJSON, NFData, IsString, Arbitrary)
+newtype JSONString = JSONString
+  { getJSONString :: Text
+  } deriving (Eq, Ord, Generic, ToJSON, FromJSON, NFData, IsString, Arbitrary)
