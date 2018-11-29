@@ -4,6 +4,7 @@
 
 import Data.Aeson.JSONUnit (JSONUnit)
 import Data.Aeson.JSONEither (JSONEither)
+import Data.Aeson.JSONMaybe (JSONMaybe)
 import Data.Aeson.JSONTuple (JSONTuple)
 import Data.Aeson.JSONDateTime (JSONDateTime)
 import Data.Aeson.JSONString (JSONString)
@@ -55,6 +56,7 @@ tests = do
   registerTopic "ServerToClient" (Proxy :: Proxy ServerToClient)
   registerTopic "JSONUnit" (Proxy :: Proxy JSONUnit)
   registerTopic "JSONEither" (Proxy :: Proxy (JSONEither JSONUnit JSONUnit))
+  registerTopic "JSONMaybe" (Proxy :: Proxy (JSONMaybe JSONUnit))
   registerTopic "JSONTuple" (Proxy :: Proxy (JSONTuple JSONUnit JSONUnit))
   registerTopic "JSONDate" (Proxy :: Proxy Day)
   registerTopic "JSONDateTime" (Proxy :: Proxy JSONDateTime)
