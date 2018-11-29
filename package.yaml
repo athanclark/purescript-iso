@@ -45,6 +45,7 @@ dependencies:
 - quickcheck-instances
 - utf8-string
 - uuid
+- vector
 - zeromq4-haskell
 - zeromq4-simple
 
