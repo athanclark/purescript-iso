@@ -39,6 +39,7 @@ dependencies:
 - scientific
 - stm
 - strict
+- symbiote
 - text
 - time
 - QuickCheck
@@ -66,3 +67,4 @@ tests:
     - tasty-quickcheck
     - QuickCheck
     - time
+    - symbiote

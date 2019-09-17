@@ -3,7 +3,7 @@
   , DeriveGeneric
   #-}
 
-module Data.Aeson.JSONDateTime (JSONDateTime, getJSONDateTime, jsonDateTime) where
+module Data.PureScriptIso.DateTime (DateTime, getDateTime, jsonDateTime) where
 
 import Data.Time
   ( UTCTime, formatTime, iso8601DateFormat, defaultTimeLocale
@@ -16,22 +16,22 @@ import GHC.Generics (Generic)
 import System.IO.Unsafe (unsafePerformIO)
 
 
-newtype JSONDateTime = JSONDateTime
-  { getJSONDateTime :: UTCTime
+newtype DateTime = DateTime
+  { getDateTime :: UTCTime
   } deriving (Eq, Ord, Show, Generic, ToJSON, FromJSON, NFData)
 
 
-jsonDateTime :: UTCTime -> JSONDateTime
+jsonDateTime :: UTCTime -> DateTime
 jsonDateTime now =
   let p = take 3 (formatTime defaultTimeLocale "%q" now)
       s = formatTime defaultTimeLocale (iso8601DateFormat $ Just "%H:%M:%S") now
       s' = s ++ "." ++ p ++ "Z"
   in  case decode $ LBS8.fromString $ show s' of
-        Just x -> JSONDateTime x
+        Just x -> DateTime x
         Nothing -> error $ "DateTime parsing failed: " ++ s'
 
 
-instance Arbitrary JSONDateTime where
+instance Arbitrary DateTime where
   arbitrary =
     let go = unsafePerformIO (jsonDateTime <$> getCurrentTime)
     in  go `seq` pure go

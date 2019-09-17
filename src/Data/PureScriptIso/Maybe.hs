@@ -5,8 +5,9 @@
   , DeriveAnyClass
   #-}
 
-module Data.Aeson.JSONMaybe where
+module Data.PureScriptIso.Maybe where
 
+import Prelude hiding (Maybe (..))
 import Data.Aeson (ToJSON (..), FromJSON (..), Value (String, Array))
 import Data.Aeson.Types (typeMismatch)
 import qualified Data.Vector as V
@@ -16,30 +17,30 @@ import Test.QuickCheck.Gen (oneof)
 import GHC.Generics (Generic)
 
 
-data JSONMaybe a
-  = JSONNothing
-  | JSONJust a
+data Maybe a
+  = Nothing
+  | Just a
   deriving (Eq, Ord, Show, Generic, NFData)
 
-instance (ToJSON a) => ToJSON (JSONMaybe a) where
+instance (ToJSON a) => ToJSON (Maybe a) where
   toJSON x = case x of
-    JSONNothing -> String ""
-    JSONJust y -> Array [toJSON y]
+    Nothing -> String ""
+    Just y -> Array [toJSON y]
 
-instance (FromJSON a) => FromJSON (JSONMaybe a) where
+instance (FromJSON a) => FromJSON (Maybe a) where
   parseJSON json = case json of
     String s
-      | s == "" -> pure JSONNothing
+      | s == "" -> pure Nothing
       | otherwise -> fail'
     Array a
-      | length a == 1 -> JSONJust <$> parseJSON (a V.! 0)
+      | length a == 1 -> Just <$> parseJSON (a V.! 0)
       | otherwise -> fail'
     _ -> fail'
     where
-      fail' = typeMismatch "JSONMaybe" json
+      fail' = typeMismatch "Maybe" json
 
-instance (Arbitrary a) => Arbitrary (JSONMaybe a) where
+instance (Arbitrary a) => Arbitrary (Maybe a) where
   arbitrary = oneof
-    [ pure JSONNothing
-    , JSONJust <$> arbitrary
+    [ pure Nothing
+    , Just <$> arbitrary
     ]

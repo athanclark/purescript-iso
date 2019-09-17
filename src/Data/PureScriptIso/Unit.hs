@@ -4,30 +4,33 @@
   , DeriveAnyClass
   #-}
 
-module Data.Aeson.JSONUnit where
+module Data.PureScriptIso.Unit where
 
 import Data.Aeson (ToJSON (..), FromJSON (..), Value (String))
 import Data.Aeson.Types (typeMismatch)
 import Control.DeepSeq (NFData)
 import Test.QuickCheck (Arbitrary (..))
+-- import Test.Serialization.Symbiote (SymbioteOperation (..))
 import GHC.Generics (Generic)
 
 
-data JSONUnit = JSONUnit
+data Unit = Unit
   deriving (Eq, Ord, Show, Generic, NFData)
 
-instance Arbitrary JSONUnit where
-  arbitrary = pure JSONUnit
+instance Arbitrary Unit where
+  arbitrary = pure Unit
 
-instance ToJSON JSONUnit where
-  toJSON JSONUnit = String ""
+instance ToJSON Unit where
+  toJSON Unit = String ""
 
-instance FromJSON JSONUnit where
+instance FromJSON Unit where
   parseJSON json = case json of
     String x
-      | x == "" -> pure JSONUnit
+      | x == "" -> pure Unit
       | otherwise -> fail'
     _ -> fail'
     where
-      fail' = typeMismatch "JSONUnit" json
+      fail' = typeMismatch "Unit" json
 
+-- instance SymbioteOperation Unit where
+  

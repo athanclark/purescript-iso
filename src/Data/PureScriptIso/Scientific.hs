@@ -3,11 +3,11 @@
   , GeneralizedNewtypeDeriving
   #-}
 
-module Data.Aeson.JSONScientific where
+module Data.PureScriptIso.Scientific where
 
 import Data.Aeson (ToJSON (..), FromJSON (..), Value (String))
 import Data.Aeson.Types (typeMismatch)
-import Data.Scientific (Scientific, coefficient, base10Exponent)
+import qualified Data.Scientific as S
 import qualified Data.Text as T
 import Text.Read (readMaybe)
 import Control.DeepSeq (NFData)
@@ -16,19 +16,19 @@ import Test.QuickCheck (Arbitrary (..))
 import Test.QuickCheck.Gen (elements, listOf1, listOf)
 
 
-newtype JSONScientific = JSONScientific
-  { getJSONScientific :: Scientific
+newtype Scientific = Scientific
+  { getScientific :: S.Scientific
   } deriving (Eq, Ord, Show, Read, Generic, Num, Real, NFData, Fractional)
 
-instance ToJSON JSONScientific where
-  toJSON (JSONScientific x) = toJSON $
-    let c = coefficient x
+instance ToJSON Scientific where
+  toJSON (Scientific x) = toJSON $
+    let c = S.coefficient x
         e | c == 0 = 0 -- if coefficient is 0, then the whole value is 0
           | otherwise =
             let g :: Int -- decimal places in coefficient alone
                 g | c > 0 = length (show c) - 1
                   | otherwise = length (show c) - 2
-            in  base10Exponent x + g
+            in  S.base10Exponent x + g
         -- coefficient shown, but without trailing zeros (exponent)
         cShownReducedExp :: String
         cShownReducedExp
@@ -49,17 +49,17 @@ instance ToJSON JSONScientific where
       dropZerosFromRight :: String -> String
       dropZerosFromRight = reverse . dropWhile (== '0') . reverse
 
-instance FromJSON JSONScientific where
+instance FromJSON Scientific where
   parseJSON json = case json of
     String s -> case readMaybe (T.unpack s) of
-      Just x -> pure (JSONScientific x)
+      Just x -> pure (Scientific x)
       _ -> fail'
     _ -> fail'
     where
-      fail' = typeMismatch "JSONScientific" json
+      fail' = typeMismatch "Scientific" json
 
-instance Arbitrary JSONScientific where
-  arbitrary = JSONScientific <$> arbitraryFloat
+instance Arbitrary Scientific where
+  arbitrary = Scientific <$> arbitraryFloat
     where
       arbitraryFloat = do
         s <- listOf1 (elements ['0'..'9'])

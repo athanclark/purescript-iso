@@ -15,9 +15,11 @@ import Data.Aeson.JSONScientific (JSONScientific)
 import Data.Time (UTCTime)
 import Data.Time.Calendar (Day)
 
-import Test.Serialization (ServerParams (..), startServer)
-import Test.Serialization.Types
-  (TestSuiteM, registerTopic, MsgType, ClientToServer, ServerToClient, TestTopic)
+-- import Test.Serialization (ServerParams (..), startServer)
+-- import Test.Serialization.Types
+--   (TestSuiteM, registerTopic, MsgType, ClientToServer, ServerToClient, TestTopic)
+import Test.Serialization.Symbiote
+  (SymbioteT, register)
 import Test.Tasty (defaultMain, testGroup)
 import qualified Test.Tasty.QuickCheck as QC
 import Test.QuickCheck.Property (succeeded, failed, Result)

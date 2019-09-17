@@ -4,8 +4,9 @@
   , DeriveAnyClass
   #-}
 
-module Data.Aeson.JSONEither where
+module Data.PureScriptIso.Either where
 
+import Prelude hiding (Either (..))
 import Data.Aeson (ToJSON (..), FromJSON (..), Value (Object), object, (.=), (.:))
 import Data.Aeson.Types (typeMismatch)
 import Control.DeepSeq (NFData)
@@ -15,28 +16,28 @@ import Test.QuickCheck.Gen (oneof)
 import GHC.Generics (Generic)
 
 
-data JSONEither a b
-  = JSONLeft a
-  | JSONRight b
+data Either a b
+  = Left a
+  | Right b
   deriving (Eq, Ord, Show, Generic, NFData)
 
-instance (ToJSON a, ToJSON b) => ToJSON (JSONEither a b) where
+instance (ToJSON a, ToJSON b) => ToJSON (Either a b) where
   toJSON x = case x of
-    JSONLeft a -> object ["e" .= a]
-    JSONRight b -> object ["x" .= b]
+    Left a -> object ["e" .= a]
+    Right b -> object ["x" .= b]
 
-instance (FromJSON a, FromJSON b) => FromJSON (JSONEither a b) where
+instance (FromJSON a, FromJSON b) => FromJSON (Either a b) where
   parseJSON json = case json of
     Object o -> do
-      let e = JSONLeft <$> o .: "e"
-          x = JSONRight <$> o .: "x"
+      let e = Left <$> o .: "e"
+          x = Right <$> o .: "x"
       e <|> x
     _ -> fail'
     where
-      fail' = typeMismatch "JSONEither" json
+      fail' = typeMismatch "Either" json
 
-instance (Arbitrary a, Arbitrary b) => Arbitrary (JSONEither a b) where
+instance (Arbitrary a, Arbitrary b) => Arbitrary (Either a b) where
   arbitrary = oneof
-    [ JSONLeft <$> arbitrary
-    , JSONRight <$> arbitrary
+    [ Left <$> arbitrary
+    , Right <$> arbitrary
     ]

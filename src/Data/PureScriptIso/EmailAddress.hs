@@ -3,9 +3,9 @@
   , DeriveGeneric
   #-}
 
-module Data.Aeson.JSONEmailAddress where
+module Data.PureScriptIso.EmailAddress where
 
-import Text.EmailAddress (EmailAddress, emailAddressFromString)
+import qualified Text.EmailAddress as E
 import Data.Aeson (ToJSON, FromJSON)
 import Control.Monad (replicateM)
 import Control.DeepSeq (NFData (..))
@@ -15,20 +15,20 @@ import GHC.Generics (Generic)
 
 -- FIXME restrict to 64 x 63 chars
 
-newtype JSONEmailAddress = JSONEmailAddress
-  { getJSONEmailAddress :: EmailAddress
+newtype EmailAddress = EmailAddress
+  { getEmailAddress :: E.EmailAddress
   } deriving (Eq, Ord, Show, Generic, FromJSON, ToJSON)
 
-instance NFData JSONEmailAddress where
-  rnf (JSONEmailAddress x) = seq x ()
+instance NFData EmailAddress where
+  rnf (EmailAddress x) = seq x ()
 
-instance Arbitrary JSONEmailAddress where
+instance Arbitrary EmailAddress where
   arbitrary = do
     name <- arbitraryNonEmptyAscii 64
     domain <- arbitraryNonEmptyAscii 63
     let x = name ++ "@" ++ domain ++ ".com"
-    case emailAddressFromString x of
-      Just e -> pure (JSONEmailAddress e)
+    case E.emailAddressFromString x of
+      Just e -> pure (EmailAddress e)
       Nothing -> error x
     where
       arbitraryNonEmptyAscii s = do

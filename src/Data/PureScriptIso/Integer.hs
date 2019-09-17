@@ -3,8 +3,10 @@
   , GeneralizedNewtypeDeriving
   #-}
 
-module Data.Aeson.JSONInteger (JSONInteger, jsonInteger, getJSONInteger) where
+module Data.PureScriptIso.Integer (Integer, jsonInteger, getInteger) where
 
+import Prelude hiding (Integer)
+import qualified Prelude as P
 import Data.Aeson (ToJSON (..), FromJSON (..), Value (String))
 import Data.Aeson.Types (typeMismatch)
 import Data.Scientific (Scientific, coefficient, base10Exponent, scientific)
@@ -16,27 +18,27 @@ import Test.QuickCheck (Arbitrary (..))
 import Test.QuickCheck.Gen (elements, listOf1)
 
 
-newtype JSONInteger = JSONInteger Scientific
+newtype Integer = Integer Scientific
   deriving (Eq, Ord, Show, Read, Generic, Num, Real, NFData)
 
-instance Enum JSONInteger where
+instance Enum Integer where
   toEnum = jsonInteger . fromIntegral
-  fromEnum = fromIntegral . getJSONInteger
+  fromEnum = fromIntegral . getInteger
 
-instance Integral JSONInteger where
-  toInteger = getJSONInteger
+instance Integral Integer where
+  toInteger = getInteger
   quotRem x y =
     let (a,b) = quotRem (toInteger x) (toInteger y)
     in  (jsonInteger a, jsonInteger b)
 
-jsonInteger :: Integer -> JSONInteger
-jsonInteger i = JSONInteger (scientific i 0)
+jsonInteger :: P.Integer -> Integer
+jsonInteger i = Integer (scientific i 0)
 
-getJSONInteger :: JSONInteger -> Integer
-getJSONInteger (JSONInteger x) = coefficient x * (10 ^ base10Exponent x)
+getInteger :: Integer -> P.Integer
+getInteger (Integer x) = coefficient x * (10 ^ base10Exponent x)
 
-instance ToJSON JSONInteger where
-  toJSON (JSONInteger x) = toJSON $
+instance ToJSON Integer where
+  toJSON (Integer x) = toJSON $
     let c = coefficient x
         e | c == 0 = 0
           | otherwise =
@@ -60,20 +62,20 @@ instance ToJSON JSONInteger where
       dropZerosFromRight :: String -> String
       dropZerosFromRight = reverse . dropWhile (== '0') . reverse
 
-instance FromJSON JSONInteger where
+instance FromJSON Integer where
   parseJSON json = case json of
     String s -> case readMaybe (T.unpack s) of
-      Just x -> pure (JSONInteger x)
+      Just x -> pure (Integer x)
       _ -> fail'
     _ -> fail'
     where
-      fail' = typeMismatch "JSONInteger" json
+      fail' = typeMismatch "Integer" json
 
-instance Arbitrary JSONInteger where
-  arbitrary = JSONInteger {-. go-} <$> {-scale (^ 10)-} arbitraryInt
+instance Arbitrary Integer where
+  arbitrary = Integer {-. go-} <$> {-scale (^ 10)-} arbitraryInt
     where
       arbitraryInt = do
         s <- listOf1 (elements ['0'..'9'])
         case readMaybe s of
           Just x -> pure x
-          Nothing -> error $ "Can't parse JSONInteger: " ++ s
+          Nothing -> error $ "Can't parse Integer: " ++ s

@@ -4,8 +4,9 @@
   , DeriveGeneric
   #-}
 
-module Data.Aeson.JSONString (JSONString (..)) where
+module Data.PureScriptIso.String (String (..)) where
 
+import Prelude hiding (String)
 import Data.Text (Text)
 import Data.Aeson (ToJSON, FromJSON)
 import Data.String (IsString)
@@ -15,6 +16,6 @@ import Test.QuickCheck (Arbitrary)
 import Test.QuickCheck.Instances ()
 
 
-newtype JSONString = JSONString
-  { getJSONString :: Text
+newtype String = String
+  { getString :: Text
   } deriving (Eq, Ord, Generic, ToJSON, FromJSON, NFData, IsString, Arbitrary)
